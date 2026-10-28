@@ -51,6 +51,10 @@ The villa was wired with a few mistakes. Your job is to find and fix them.
 3 stars need 900 points and no mistakes. Before the run you can still explore: drag the time slider, rotate the villa,
 show the roof, or click a room to see inside.
 
+The **Labels** buttons on the 3D view choose how much text it shows: *Smart* (the default) shows only rooms that need
+attention plus the room under the pointer, *All* shows every room, and *Off* hides room labels. In a building,
+**Floors** hides the upper floors so you can look into the lower ones.
+
 ## Level 2
 
 Two villas share a three-phase supply from a feeder pillar. Every room starts on L1, and Villa B is 85 m away on a feeder

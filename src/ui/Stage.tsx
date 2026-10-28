@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { SiteScene } from '../render/SiteScene';
+import type { LabelMode } from '../render/labelRules';
 import type { Level, SimResult } from '../sim';
 
 interface Props {
@@ -7,17 +8,19 @@ interface Props {
   result: SimResult;
   roofOn: boolean;
   faded: ReadonlySet<string>;
+  labelMode: LabelMode;
+  floorLimit: number | null;
   onRoomClick: (id: string) => void;
 }
 
 /** Hosts the Three.js scene and passes it each new result. */
-export function Stage({ level, result, roofOn, faded, onRoomClick }: Props) {
+export function Stage({ level, result, roofOn, faded, labelMode, floorLimit, onRoomClick }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const scene = useRef<SiteScene | null>(null);
-  const latest = useRef({ result, roofOn, faded, onRoomClick });
+  const latest = useRef({ result, roofOn, faded, labelMode, floorLimit, onRoomClick });
   const [failed, setFailed] = useState(false);
 
-  useEffect(() => { latest.current = { result, roofOn, faded, onRoomClick }; });
+  useEffect(() => { latest.current = { result, roofOn, faded, labelMode, floorLimit, onRoomClick }; });
 
   // Create the scene once per level and bring it up to date with the current props
   useEffect(() => {
@@ -34,6 +37,8 @@ export function Stage({ level, result, roofOn, faded, onRoomClick }: Props) {
     s.update(p.result);
     s.setRoofVisible(p.roofOn);
     s.setFaded(p.faded);
+    s.setLabelMode(p.labelMode);
+    s.setFloorLimit(p.floorLimit);
     scene.current = s;
     return () => { s.dispose(); scene.current = null; };
   }, [level]);
@@ -41,6 +46,8 @@ export function Stage({ level, result, roofOn, faded, onRoomClick }: Props) {
   useEffect(() => { scene.current?.update(result); }, [result]);
   useEffect(() => { scene.current?.setRoofVisible(roofOn); }, [roofOn]);
   useEffect(() => { scene.current?.setFaded(faded); }, [faded]);
+  useEffect(() => { scene.current?.setLabelMode(labelMode); }, [labelMode]);
+  useEffect(() => { scene.current?.setFloorLimit(floorLimit); }, [floorLimit]);
 
   return (
     <div className="stage" ref={host}>

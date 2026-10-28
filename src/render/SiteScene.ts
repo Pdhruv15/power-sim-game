@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { PHASES, type Board, type Circuit, type Level, type SimResult } from '../sim';
 import { skyColor, STATUS, statusColor } from './colors';
+import { roomLabelVisible, type LabelMode, type RoomState } from './labelRules';
 import { Landscape } from './Landscape';
 import { layoutLandscape, PAVEMENT_WIDTH, ROAD_WIDTH, type Rect } from './landscapeLayout';
 
@@ -26,6 +27,9 @@ interface RoomParts {
   marker: THREE.Mesh;
   markerY: number;
   label: HTMLDivElement;
+  labelObj: CSS2DObject;
+  floor: number;
+  state: RoomState;
 }
 
 interface BoardParts {
@@ -33,6 +37,9 @@ interface BoardParts {
   marker: THREE.Mesh;
   markerY: number;
   label: HTMLDivElement;
+  labelObj: CSS2DObject;
+  floor: number;
+  alarm: boolean;
 }
 
 /**
@@ -59,6 +66,14 @@ export class SiteScene {
   private pickRooms: THREE.Object3D[] = [];
   private pickRoof: THREE.Object3D[] = [];
   private faded = new Set<string>();
+  private labelMode: LabelMode = 'smart';
+  private hovered: string | null = null;
+  /** Highest floor shown; upper floors are hidden so the player can look inside. Infinity = all. */
+  private floorLimit = Infinity;
+  /** Objects drawn on each floor above the ground, for hiding floors. */
+  private floorObjects: { floor: number; obj: THREE.Object3D }[] = [];
+  private labelObjs = new Map<HTMLElement, CSS2DObject>();
+  private hoverQueued: PointerEvent | null = null;
   private landscape: Landscape | null = null;
   private span = 20;
   private clock = new THREE.Clock();
@@ -91,6 +106,8 @@ export class SiteScene {
     const canvas = this.renderer.domElement;
     canvas.addEventListener('pointerdown', this.onPointerDown);
     canvas.addEventListener('pointerup', this.onPointerUp);
+    canvas.addEventListener('pointermove', this.onPointerMove);
+    canvas.addEventListener('pointerleave', this.onPointerLeave);
     this.renderer.setAnimationLoop(this.frame);
   }
 
@@ -119,6 +136,7 @@ export class SiteScene {
       rm.cableMat.color.copy(col);
       rm.marker.visible = c.tripped;
       const state = c.tripped ? 'TRIPPED' : c.dead ? 'no supply' : c.overloaded ? `${c.amps.toFixed(1)} A · OVERLOAD` : `${c.amps.toFixed(1)} / ${c.breakerA} A`;
+      rm.state = { band: c.band, overloaded: c.overloaded, tripped: c.tripped, dead: c.dead };
       rm.label.className = `scene-label st-${c.dead ? 'off' : c.band}${c.tripped || c.overloaded ? ' alarm' : ''}`;
       rm.label.lastChild!.textContent = state;
     }
@@ -131,9 +149,25 @@ export class SiteScene {
       const amps = b.phases === 3
         ? PHASES.map((p, i) => `${p} ${Math.abs(b.phaseAmps[i]).toFixed(0)}`).join(' · ') + ' A'
         : `${b.amps.toFixed(1)} / ${b.ratingA} A`;
+      bp.alarm = b.tripped || b.overloaded;
       bp.label.className = `scene-label tag st-${b.dead ? 'off' : b.band}${b.tripped || b.overloaded ? ' alarm' : ''}`;
       bp.label.lastChild!.textContent = b.tripped ? 'TRIPPED' : b.dead ? 'no supply' : amps;
     }
+    this.refreshLabels();
+  }
+
+  /** Which room labels to show: smart (default), all, or off. */
+  setLabelMode(mode: LabelMode): void {
+    this.labelMode = mode;
+    this.refreshLabels();
+  }
+
+  /** Show floors 0…limit only (null = all), so the player can look into the lower floors. */
+  setFloorLimit(limit: number | null): void {
+    this.floorLimit = limit ?? Infinity;
+    for (const { floor, obj } of this.floorObjects) obj.visible = floor <= this.floorLimit;
+    this.hovered = null;
+    this.refreshLabels();
   }
 
   setRoofVisible(visible: boolean): void {
@@ -143,6 +177,17 @@ export class SiteScene {
   /** Rooms whose walls are faded so the player can see inside. */
   setFaded(ids: ReadonlySet<string>): void {
     this.faded = new Set(ids);
+    this.refreshLabels();
+  }
+
+  /** Apply the label mode, hover, clicked rooms and hidden floors to every label. */
+  private refreshLabels(): void {
+    for (const [id, rm] of this.rooms) {
+      rm.labelObj.visible = rm.floor <= this.floorLimit && roomLabelVisible(this.labelMode, rm.state, this.faded.has(id), this.hovered === id);
+    }
+    for (const bp of this.boards.values()) {
+      bp.labelObj.visible = bp.floor <= this.floorLimit && (this.labelMode !== 'off' || bp.alarm);
+    }
   }
 
   dispose(): void {
@@ -151,6 +196,8 @@ export class SiteScene {
     const canvas = this.renderer.domElement;
     canvas.removeEventListener('pointerdown', this.onPointerDown);
     canvas.removeEventListener('pointerup', this.onPointerUp);
+    canvas.removeEventListener('pointermove', this.onPointerMove);
+    canvas.removeEventListener('pointerleave', this.onPointerLeave);
     this.controls.dispose();
     this.scene.traverse(o => {
       if (o instanceof THREE.Mesh) {
@@ -211,6 +258,7 @@ export class SiteScene {
         const g = new THREE.Group();
         g.position.set(x + W / 2, f * FLOOR_H, 0);
         this.site.add(g);
+        if (f > 0) this.floorObjects.push({ floor: f, obj: g });
         const db = this.buildVilla(g, b, level.circuits.filter(c => c.board === b.id), units.length > 1, floorOf(b) === topFloor);
         dbAt.set(b.id, db.add(g.position));
         if (f === floors[0]) footprints.push(around(g.position.x, 0, W / 2 + 0.3, sizeOf.get(b.id)!.D / 2 + 0.3));
@@ -224,10 +272,13 @@ export class SiteScene {
       const at = building
         ? new THREE.Vector3(-rowW / 2 - RISER_SETBACK, floorOf(b) * FLOOR_H, b.parent === null ? 2.5 : 0)
         : new THREE.Vector3((i - (others.length - 1) / 2) * 4, 0, maxD / 2 + PILLAR_SETBACK);
-      box(0.9, 1.4, 0.5, mat(0x6f7a85, { metalness: 0.3 }), at.x, at.y + 0.7, at.z, this.site);
+      const cabinet = box(0.9, 1.4, 0.5, mat(0x6f7a85, { metalness: 0.3 }), at.x, at.y + 0.7, at.z, this.site);
+      if (floorOf(b) > 0) this.floorObjects.push({ floor: floorOf(b), obj: cabinet });
       dbAt.set(b.id, at);
       if (at.y === 0) keepClear.push(around(at.x, at.z, 0.45, 0.25));
-      this.boards.set(b.id, this.boardParts(b, new THREE.Vector3(at.x, at.y + 2.2, at.z), null));
+      // On a riser the main board's label sits higher, clear of the floor board beside it
+      const labelY = at.y + (building && b.parent === null ? 3.6 : 2.2);
+      this.boards.set(b.id, this.boardParts(b, new THREE.Vector3(at.x, labelY, at.z), null));
     });
 
     // Feeder cables: up the riser to the child's floor, along the parent's line, then across to the child's board
@@ -283,7 +334,7 @@ export class SiteScene {
 
       // Floor glows with the circuit's status colour
       const floorMat = mat(0x262d34, { emissive: STATUS.ok, emissiveIntensity: 0.4 });
-      const floor = box(ROOM - WALL_T, 0.06, ROOM - WALL_T, floorMat, cx, BASE + 0.03, cz, g);
+      const floorMesh = box(ROOM - WALL_T, 0.06, ROOM - WALL_T, floorMat, cx, BASE + 0.03, cz, g);
 
       // Walls share one material so a click fades the whole room. The corridor wall has a door gap.
       const wallMat = mat(0xece4d4, { transparent: true, opacity: 1 });
@@ -311,10 +362,14 @@ export class SiteScene {
       const markerY = BASE + WALL_H + MARKER_LIFT;
       const marker = tripMarker(cx, markerY, cz, g);
       const label = this.addLabel(g, c.room, new THREE.Vector3(cx, BASE + WALL_H + 0.7, cz), 'scene-label');
+      const floor = board.floor ?? 0;
       label.append(document.createElement('span'));
 
-      for (const m of [floor, ...walls]) { m.userData.circuitId = c.id; this.pickRooms.push(m); }
-      this.rooms.set(c.id, { floorMat, wallMat, bandMat, cableMat, marker, markerY, label });
+      for (const m of [floorMesh, ...walls]) { m.userData.circuitId = c.id; m.userData.floor = floor; this.pickRooms.push(m); }
+      this.rooms.set(c.id, {
+        floorMat, wallMat, bandMat, cableMat, marker, markerY, label, labelObj: this.labelObjs.get(label)!, floor,
+        state: { band: 'ok', overloaded: false, tripped: false, dead: false },
+      });
     });
 
     if (withRoof) this.buildRoof(g, W, D, board.solarKw);
@@ -355,7 +410,10 @@ export class SiteScene {
     const label = this.addLabel(host, name, labelAt, 'scene-label tag');
     label.append(document.createElement('span'));
     const markerY = labelAt.y + 1.2;
-    return { cableMat: null, marker: tripMarker(labelAt.x, markerY, labelAt.z, host), markerY, label };
+    return {
+      cableMat: null, marker: tripMarker(labelAt.x, markerY, labelAt.z, host), markerY, label,
+      labelObj: this.labelObjs.get(label)!, floor: board.floor ?? 0, alarm: false,
+    };
   }
 
   private addLabel(parent: THREE.Object3D, text: string, at: THREE.Vector3, className: string): HTMLDivElement {
@@ -367,6 +425,7 @@ export class SiteScene {
     const obj = new CSS2DObject(el);
     obj.position.copy(at);
     parent.add(obj);
+    this.labelObjs.set(el, obj);
     return el;
   }
 
@@ -409,14 +468,40 @@ export class SiteScene {
   /** A click (not a drag) picks a room. A visible roof blocks the click. */
   private onPointerUp = (e: PointerEvent): void => {
     if (!this.down || Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) > 5) return;
+    const id = this.roomAt(e);
+    if (id) this.onRoomClick(id);
+  };
+
+  /** Room under the pointer, ignoring hidden floors. A visible roof blocks the view. */
+  private roomAt(e: PointerEvent): string | null {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
     const ray = new THREE.Raycaster();
     ray.setFromCamera(ndc, this.camera);
-    const roofOn = this.roofs.some(r => r.visible);
-    const targets = roofOn ? [...this.pickRoof, ...this.pickRooms] : this.pickRooms;
+    const shown = (o: THREE.Object3D) => (o.userData.floor ?? 0) <= this.floorLimit;
+    const roofs = this.pickRoof.filter(o => o.parent?.visible && o.parent.parent?.visible !== false);
+    const targets = [...roofs, ...this.pickRooms.filter(shown)];
     const id = ray.intersectObjects(targets, false)[0]?.object.userData.circuitId;
-    if (typeof id === 'string') this.onRoomClick(id);
+    return typeof id === 'string' ? id : null;
+  }
+
+  /** Hover shows a room's label in smart mode. Checked once per frame at most. */
+  private onPointerMove = (e: PointerEvent): void => {
+    if (e.buttons) return; // dragging the view
+    if (!this.hoverQueued) requestAnimationFrame(() => {
+      const ev = this.hoverQueued;
+      this.hoverQueued = null;
+      if (!ev) return;
+      const id = this.roomAt(ev);
+      this.renderer.domElement.style.cursor = id ? 'pointer' : '';
+      if (id !== this.hovered) { this.hovered = id; this.refreshLabels(); }
+    });
+    this.hoverQueued = e;
+  };
+
+  private onPointerLeave = (): void => {
+    this.hoverQueued = null;
+    if (this.hovered) { this.hovered = null; this.refreshLabels(); }
   };
 }
 
