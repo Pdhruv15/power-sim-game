@@ -8,6 +8,9 @@ const NIGHT = { zenith: 0x050a16, horizon: 0x16223a, below: 0x0c1424 };
 
 const STARS = 600;
 const CLOUDS = 10;
+/** Clouds float above the ground (y = 0), outside the tile's edge. */
+const CLOUD_MIN_Y = 4;
+const CLOUD_RANGE_Y = 7;
 
 type Stop = typeof DAY;
 const mix = (a: Stop, b: Stop, t: number, key: keyof Stop, out: THREE.Color) =>
@@ -67,7 +70,7 @@ export class Sky {
     this.stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: false, transparent: true, opacity: 0, depthWrite: false }));
     this.group.add(this.stars);
 
-    // Clouds: a few soft puffs around and below the tile's edge
+    // Clouds: a few soft puffs in the sky around the tile, above ground level
     const puff = new THREE.IcosahedronGeometry(1, 1);
     const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true, transparent: true, opacity: 0.92 });
     for (let i = 0; i < CLOUDS; i++) {
@@ -81,7 +84,7 @@ export class Sky {
       }
       const a = (i / CLOUDS) * Math.PI * 2 + rand() * 0.4;
       const d = tileSize * (0.62 + rand() * 0.35);
-      g.position.set(Math.cos(a) * d, -3 - rand() * 9, Math.sin(a) * d);
+      g.position.set(Math.cos(a) * d, CLOUD_MIN_Y + rand() * CLOUD_RANGE_Y, Math.sin(a) * d);
       g.scale.set(1.4, 0.7, 1);
       this.group.add(g);
       this.clouds.push({ mesh: g, speed: 0.15 + rand() * 0.2 });
