@@ -3,6 +3,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { PHASES, type Board, type Circuit, type Level, type SimResult } from '../sim';
 import { skyColor, STATUS, statusColor } from './colors';
+import { Landscape } from './Landscape';
+import { layoutLandscape, PAVEMENT_WIDTH, ROAD_WIDTH, type Rect } from './landscapeLayout';
 
 // Plan dimensions in metres. Each villa has two rows of rooms either side of a corridor, one room per circuit.
 const ROOM = 4.4, WALL_H = 2.8, WALL_T = 0.14, CORRIDOR = 1.4, DOOR = 1.0, BASE = 0.2;
@@ -57,6 +59,7 @@ export class SiteScene {
   private pickRooms: THREE.Object3D[] = [];
   private pickRoof: THREE.Object3D[] = [];
   private faded = new Set<string>();
+  private landscape: Landscape | null = null;
   private span = 20;
   private clock = new THREE.Clock();
   private resizeObserver: ResizeObserver;
@@ -104,6 +107,7 @@ export class SiteScene {
     this.sunLight.intensity = 2.6 * day;
     this.hemi.intensity = 0.15 + 0.85 * day;
     this.scene.background = skyColor(height, (this.scene.background as THREE.Color) ?? new THREE.Color());
+    this.landscape?.setDaylight(day);
 
     for (const c of r.circuits) {
       const rm = this.rooms.get(c.id);
@@ -169,7 +173,7 @@ export class SiteScene {
     Object.assign(this.sunLight.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 1, far: this.span * 4 });
     this.scene.add(this.hemi, fill, this.sunLight, this.sunLight.target, this.sunDisc);
 
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), new THREE.MeshStandardMaterial({ color: 0xcfbb94, roughness: 1 }));
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), new THREE.MeshStandardMaterial({ color: 0x7a9a58, roughness: 1 })); // grass
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     this.scene.add(ground);
@@ -196,8 +200,10 @@ export class SiteScene {
     this.site.rotation.y = -THREE.MathUtils.degToRad(level.orientation); // clockwise from north
     this.scene.add(this.site);
 
-    // Where each board sits, in site coordinates
+    // Where each board sits, in site coordinates, and what the scenery must keep clear of
     const dbAt = new Map<string, THREE.Vector3>();
+    const footprints: Rect[] = [];
+    const keepClear: Rect[] = [];
     for (const f of floors) {
       let x = -rowWidth(f) / 2;
       for (const b of units.filter(u => floorOf(u) === f)) {
@@ -207,6 +213,7 @@ export class SiteScene {
         this.site.add(g);
         const db = this.buildVilla(g, b, level.circuits.filter(c => c.board === b.id), units.length > 1, floorOf(b) === topFloor);
         dbAt.set(b.id, db.add(g.position));
+        if (f === floors[0]) footprints.push(around(g.position.x, 0, W / 2 + 0.3, sizeOf.get(b.id)!.D / 2 + 0.3));
         x += W + gap;
       }
     }
@@ -219,6 +226,7 @@ export class SiteScene {
         : new THREE.Vector3((i - (others.length - 1) / 2) * 4, 0, maxD / 2 + PILLAR_SETBACK);
       box(0.9, 1.4, 0.5, mat(0x6f7a85, { metalness: 0.3 }), at.x, at.y + 0.7, at.z, this.site);
       dbAt.set(b.id, at);
+      if (at.y === 0) keepClear.push(around(at.x, at.z, 0.45, 0.25));
       this.boards.set(b.id, this.boardParts(b, new THREE.Vector3(at.x, at.y + 2.2, at.z), null));
     });
 
@@ -232,9 +240,19 @@ export class SiteScene {
       if (Math.abs(y1 - y0) > 0.01) box(t, Math.abs(y1 - y0), t, cableMat, from.x, (y0 + y1) / 2, from.z, this.site, false);
       box(Math.abs(to.x - from.x) + t, t / 3, t, cableMat, (from.x + to.x) / 2, y1, from.z, this.site, false);
       box(t, t / 3, Math.abs(from.z - to.z) + t, cableMat, to.x, y1, (from.z + to.z) / 2, this.site, false);
+      if (y1 < 0.5) {
+        keepClear.push({ minX: Math.min(from.x, to.x), maxX: Math.max(from.x, to.x), minZ: from.z - t, maxZ: from.z + t });
+        keepClear.push({ minX: to.x - t, maxX: to.x + t, minZ: Math.min(from.z, to.z), maxZ: Math.max(from.z, to.z) });
+      }
       const parts = this.boards.get(b.id);
       if (parts) parts.cableMat = cableMat;
     }
+
+    // Street in front (past the feeder pillar when there is one), trees, lawns and a pond around the site
+    const pillar = others.length > 0 && !building;
+    const roadZ = maxD / 2 + (pillar ? PILLAR_SETBACK + 0.6 : 3) + PAVEMENT_WIDTH + ROAD_WIDTH / 2;
+    this.landscape = new Landscape(layoutLandscape({ units: footprints, keepClear, roadZ, reach: Math.max(14, rowW * 0.5) }));
+    this.site.add(this.landscape.group);
 
     const height = (topFloor + 1) * FLOOR_H;
     this.span = Math.max(rowW + (building ? RISER_SETBACK * 2 : 0), maxD + (others.length && !building ? PILLAR_SETBACK * 2 : 0), height * 1.4);
@@ -373,6 +391,7 @@ export class SiteScene {
       rm.wallMat.depthWrite = rm.wallMat.opacity > 0.95;
     }
     if (!this.reduceMotion) {
+      this.landscape?.tick(t);
       for (const p of [...this.rooms.values(), ...this.boards.values()]) {
         if (!p.marker.visible) continue;
         p.marker.rotation.y = t * 2;
@@ -399,6 +418,11 @@ export class SiteScene {
     const id = ray.intersectObjects(targets, false)[0]?.object.userData.circuitId;
     if (typeof id === 'string') this.onRoomClick(id);
   };
+}
+
+/** Rectangle centred on (x, z) with the given half sizes. */
+function around(x: number, z: number, hx: number, hz: number): Rect {
+  return { minX: x - hx, maxX: x + hx, minZ: z - hz, maxZ: z + hz };
 }
 
 function villaSize(rooms: number): { W: number; D: number } {
