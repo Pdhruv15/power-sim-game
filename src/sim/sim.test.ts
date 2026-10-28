@@ -70,7 +70,18 @@ describe('network', () => {
 });
 
 describe('parseVilla', () => {
-  it('accepts the sample file', () => expect(sample().circuits).toHaveLength(8));
+  it('accepts the sample file', () => {
+    const v = sample();
+    expect(v.circuits).toHaveLength(8);
+    expect(v.budget).toBe(1100);
+    expect(v.circuits[3].cableMm2).toBe(1.5);
+  });
+  it('defaults the cable to 2.5 mm² and rejects unknown sizes', () => {
+    const base = { project: 'x', supply: { voltage: 230, mainBreakerA: 63 }, circuits: [{ id: 'A', room: 'R', type: 'ac', kw: 1, breakerA: 10 }] };
+    expect(parseVilla(base).circuits[0].cableMm2).toBe(2.5);
+    const bad = { ...base, circuits: [{ ...base.circuits[0], cableMm2: 3 }] };
+    expect(() => parseVilla(bad)).toThrow(/cableMm2/);
+  });
   it('lists every problem', () => {
     const bad = { project: 'x', supply: { voltage: 230 }, circuits: [
       { id: 'A', room: 'R', type: 'heater', kw: 1, breakerA: 10 },

@@ -12,6 +12,8 @@ export interface Circuit {
   kw: number;
   /** Breaker rating in amps. */
   breakerA: number;
+  /** Cable size in mm² (see CABLE_AMPS). */
+  cableMm2: number;
 }
 
 /** Contents of a villa level file (public/data/villa.json). */
@@ -24,4 +26,8 @@ export interface VillaData {
   /** Installed solar PV in kWp. 0 means no panels. */
   solarKw: number;
   circuits: Circuit[];
+  /** Spending limit for the design, in credits. Optional for free-play files. */
+  budget?: number;
+  /** Short brief shown to the player at the start of the level. */
+  intro?: string;
 }

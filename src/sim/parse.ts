@@ -1,3 +1,4 @@
+import { CABLE_AMPS, CABLE_SIZES, DEFAULT_CABLE } from './cables';
 import { LOAD_TYPES, type Circuit, type LoadType, type VillaData } from './types';
 
 /** Thrown when a level file is not valid. The message lists every problem found. */
@@ -46,9 +47,15 @@ export function parseVilla(raw: unknown): VillaData {
       if (!LOAD_TYPES.includes(c.type as LoadType)) problems.push(`${at}.type: must be one of ${LOAD_TYPES.join(', ')}`);
       if (!isPositive(c.kw)) problems.push(`${at}.kw: must be a positive number`);
       if (!isPositive(c.breakerA)) problems.push(`${at}.breakerA: must be a positive number`);
-      circuits.push({ id, room: String(c.room ?? ''), type: c.type as LoadType, kw: Number(c.kw), breakerA: Number(c.breakerA) });
+      const cableMm2 = c.cableMm2 ?? DEFAULT_CABLE;
+      if (typeof cableMm2 !== 'number' || !(cableMm2 in CABLE_AMPS)) problems.push(`${at}.cableMm2: must be one of ${CABLE_SIZES.join(', ')}`);
+      circuits.push({ id, room: String(c.room ?? ''), type: c.type as LoadType, kw: Number(c.kw), breakerA: Number(c.breakerA), cableMm2: Number(cableMm2) });
     });
   }
+
+  const budget = raw.budget;
+  if (budget !== undefined && !isPositive(budget)) problems.push('budget: must be a positive number');
+  const intro = typeof raw.intro === 'string' ? raw.intro : undefined;
 
   if (problems.length) throw new LevelError(problems);
   return {
@@ -57,5 +64,7 @@ export function parseVilla(raw: unknown): VillaData {
     supply: { voltage: supply.voltage as number, mainBreakerA: supply.mainBreakerA as number },
     solarKw: solarKw as number,
     circuits,
+    ...(budget !== undefined && { budget: budget as number }),
+    ...(intro && { intro }),
   };
 }

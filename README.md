@@ -24,11 +24,24 @@ Then open http://localhost:5173.
 
 ## How to play (Level 1)
 
-- Drag to rotate, scroll to zoom, right-drag to pan. Click a room (or its row) to see inside.
-- Move the time slider or press **Play** (one hour per second).
-- Room glow and cables show breaker loading: green below 60 %, orange 60–90 %, red above 90 %.
-- Above 100 % a breaker heats up and trips after a while. Big overloads trip fast. **Reset breakers** turns them back on.
-- The level file is `public/data/villa.json`. Edit it and reload to try another villa.
+The villa was wired with a few mistakes. Your job is to find and fix them.
+
+1. **Design.** Pick a breaker and cable for each room, the main breaker and the solar size. Learn mode shows
+   each room's highest current. The rule to follow: **room current ≤ breaker ≤ cable**. Watch the budget.
+2. **Run the day.** The day replays from 00:00 to 24:00. Rooms glow green, orange or red with their loading,
+   and the event list shows trips as they happen.
+3. **Result.** You get up to 1000 points and 3 stars. Each mistake gets a short card that says what went wrong and how to fix it.
+
+| Points | For |
+|---|---|
+| 400 | Power kept on (energy supplied ÷ energy asked for) |
+| 250 | Safe design: −125 for each breaker bigger than its cable |
+| 150 | Healthy loading: −50 for each breaker above 90 % at peak |
+| 100 | Within budget (all lost at 25 % over) |
+| 100 | Solar share of the day's energy (full at 30 %) |
+
+3 stars need 900 points and no mistakes. Before the run you can still explore: drag the time slider, rotate the villa,
+show the roof, or click a room to see inside.
 
 ## Layout
 
@@ -41,14 +54,22 @@ src/sim/                 simulation: pure TypeScript, no Three.js, React or DOM
   breaker.ts             simple breaker: heats when overloaded, trips at once on a short circuit
   network.ts             supply tree (grid → board → loads), ready for transformers later
   simulate.ts            Simulator: setHour / advance / result
+  cables.ts              cable sizes and the current each can carry
+src/game/                game rules: pure TypeScript, like src/sim
+  catalog.ts             equipment choices and prices
+  runDay.ts              scored day: frames, events, energy, peaks
+  score.ts               points, stars and lesson cards
+  hints.ts               Learn mode: each room's highest current
 src/render/              Three.js scene. Reads results only.
 src/ui/                  React HUD and app shell
 ```
 
-`src/sim` is the part that will run inside LV Design Studio as a plugin. ESLint blocks rendering and UI imports in it.
+`src/sim` and `src/game` are the parts that will run inside LV Design Studio as a plugin. ESLint blocks rendering and UI imports in them.
 
 ## Simple model (on purpose)
 
 - Single-phase supply. Current = kW ÷ (voltage × power factor). Power factor 0.9 for AC, 0.95 for lighting and sockets.
 - Sun rises at 06:00, sets at 18:00 and peaks at 55°. Solar output = kWp × 0.85 × sun height.
 - Solar connects at the DB and stops when the main breaker trips.
+- Cable ratings are rounded game values for copper cable in a wall: 1.5 mm² 16 A, 2.5 mm² 24 A, 4 mm² 32 A, 6 mm² 40 A, 10 mm² 55 A.
+- Prices are game credits, not real money.

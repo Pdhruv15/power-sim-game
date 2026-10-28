@@ -1,19 +1,24 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DAY_STEP_HOURS, runDay, scoreDay, type DayRun, type ScoreCard } from '../game';
 import { LevelError, parseVilla, Simulator, type VillaData } from '../sim';
 import { CircuitList } from './CircuitList';
+import { DesignPanel } from './DesignPanel';
+import { EventLog } from './EventLog';
 import { Kpis } from './Kpis';
+import { ScorePanel } from './ScorePanel';
 import { Stage } from './Stage';
 import { TimeControls } from './TimeControls';
 import { useAnimationClock } from './useAnimationClock';
 
 const LEVEL_URL = `${import.meta.env.BASE_URL}data/villa.json`;
 const START_HOUR = 12;
-/** Simulated hours per real second while playing. */
-const HOURS_PER_SECOND = 1;
+/** Simulated hours per real second: free exploring, and the scored day replay (24 h in 12 s). */
+const EXPLORE_SPEED = 1;
+const RUN_SPEED = 2;
 
-/** Loads the level file, then shows the simulator. */
+/** Loads the level file, then starts the game. */
 export function App() {
-  const [data, setData] = useState<VillaData | null>(null);
+  const [level, setLevel] = useState<VillaData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -23,35 +28,93 @@ export function App() {
         if (!res.ok) throw new Error(`Could not load ${LEVEL_URL} (HTTP ${res.status}).`);
         return res.json();
       })
-      .then(json => live && setData(parseVilla(json)))
+      .then(json => live && setLevel(parseVilla(json)))
       .catch((e: unknown) => live && setError(e instanceof LevelError ? e.message : `Could not open the level: ${(e as Error).message}`));
     return () => { live = false; };
   }, []);
 
   if (error) return <main className="app"><pre className="error">{error}</pre></main>;
-  if (!data) return <main className="app"><p className="muted">Loading level…</p></main>;
-  return <VillaSim data={data} />;
+  if (!level) return <main className="app"><p className="muted">Loading level…</p></main>;
+  return <VillaLevel level={level} />;
 }
 
-function VillaSim({ data }: { data: VillaData }) {
-  const sim = useMemo(() => new Simulator(data, START_HOUR), [data]);
-  const [result, setResult] = useState(() => sim.result());
+/**
+ * One level in three phases:
+ *   design  the player edits breakers, cables, main breaker and solar, and can explore any time of day
+ *   run     the scored day replays from 00:00 to 24:00
+ *   score   the score card explains what went right and wrong
+ */
+type Phase =
+  | { kind: 'design' }
+  | { kind: 'run'; day: DayRun; card: ScoreCard }
+  | { kind: 'score'; day: DayRun; card: ScoreCard };
+
+function VillaLevel({ level }: { level: VillaData }) {
+  const [design, setDesign] = useState(level);
+  const [phase, setPhase] = useState<Phase>({ kind: 'design' });
   const [playing, setPlaying] = useState(false);
   const [roofOn, setRoofOn] = useState(false);
   const [faded, setFaded] = useState<ReadonlySet<string>>(new Set());
 
-  useAnimationClock(playing, dtSeconds => {
-    sim.advance(dtSeconds * HOURS_PER_SECOND);
-    setResult(sim.result());
+  // Explore: a free simulator over the current design. Rebuilt when the design changes, keeping the time.
+  const exploreHour = useRef(START_HOUR);
+  const explore = useMemo(() => new Simulator(design, exploreHour.current), [design]);
+  const [exploreResult, setExploreResult] = useState(() => explore.result());
+  useEffect(() => setExploreResult(explore.result()), [explore]);
+
+  // Run: position in the recorded day, in frames
+  const [frame, setFrame] = useState(0);
+
+  useAnimationClock(playing, dt => {
+    if (phase.kind === 'run') {
+      const last = phase.day.frames.length - 1;
+      const next = Math.min(last, frame + (dt * RUN_SPEED) / DAY_STEP_HOURS);
+      setFrame(next);
+      if (next >= last) finishRun();
+    } else {
+      explore.advance(dt * EXPLORE_SPEED);
+      exploreHour.current = explore.hour;
+      setExploreResult(explore.result());
+    }
   });
 
-  const setHour = (h: number) => { sim.setHour(h); setResult(sim.result()); };
-  const resetBreakers = () => { sim.resetBreakers(); setResult(sim.result()); };
+  const startRun = () => {
+    const day = runDay(design);
+    setPhase({ kind: 'run', day, card: scoreDay(design, day) });
+    setFrame(0);
+    setPlaying(true);
+  };
+  const finishRun = () => {
+    if (phase.kind !== 'run') return;
+    setPlaying(false);
+    setFrame(phase.day.frames.length - 1);
+    setPhase({ kind: 'score', day: phase.day, card: phase.card });
+  };
+  const replay = () => {
+    if (phase.kind !== 'score') return;
+    setPhase({ kind: 'run', day: phase.day, card: phase.card });
+    setFrame(0);
+    setPlaying(true);
+  };
+  const backToDesign = () => {
+    setPhase({ kind: 'design' });
+    setPlaying(false);
+  };
+
+  const setExploreHour = (h: number) => {
+    explore.setHour(h);
+    exploreHour.current = explore.hour;
+    setExploreResult(explore.result());
+  };
+  const resetBreakers = () => { explore.resetBreakers(); setExploreResult(explore.result()); };
   const toggleRoom = useCallback((id: string) => setFaded(prev => {
     const next = new Set(prev);
     if (!next.delete(id)) next.add(id);
     return next;
   }), []);
+
+  const result = phase.kind === 'design' ? exploreResult : phase.day.frames[Math.floor(frame)];
+  const layout = useLayout(design);
 
   return (
     <main className="app">
@@ -61,24 +124,50 @@ function VillaSim({ data }: { data: VillaData }) {
           <h1>Villa Power Sim</h1>
         </div>
         <p className="proj">
-          <b>{data.project}</b> · {data.supply.voltage} V · main {data.supply.mainBreakerA} A · PV {data.solarKw} kWp
+          <b>{design.project}</b> · {design.supply.voltage} V · main {design.supply.mainBreakerA} A · PV {design.solarKw} kWp
+          <span className="phase">{phase.kind === 'design' ? 'Design' : phase.kind === 'run' ? 'Running the day' : 'Result'}</span>
         </p>
       </header>
 
       <section className="sim">
         <div className="stage-col">
           <div className="stage-wrap">
-            <Stage data={data} result={result} roofOn={roofOn} faded={faded} onRoomClick={toggleRoom} />
-            <Kpis result={result} solarKwp={data.solarKw} />
+            <Stage data={layout} result={result} roofOn={roofOn} faded={faded} onRoomClick={toggleRoom} />
+            <Kpis result={result} solarKwp={design.solarKw} />
             <p className="hint">Drag to rotate · scroll to zoom · right-drag to pan · click a room to see inside</p>
           </div>
           <TimeControls
+            mode={phase.kind === 'design' ? 'explore' : phase.kind === 'run' ? 'run' : 'result'}
             hour={result.hour} playing={playing} roofOn={roofOn}
-            onHour={setHour} onPlay={() => setPlaying(p => !p)} onRoof={() => setRoofOn(r => !r)} onReset={resetBreakers}
+            onHour={setExploreHour} onPlay={() => (phase.kind === 'score' ? replay() : setPlaying(p => !p))}
+            onRoof={() => setRoofOn(r => !r)}
+            onSecondary={phase.kind === 'design' ? resetBreakers : finishRun}
           />
+          <CircuitList result={result} selected={faded} onSelect={toggleRoom} />
         </div>
-        <CircuitList result={result} selected={faded} onSelect={toggleRoom} />
+
+        <div className="side">
+          {phase.kind === 'design' && (
+            <DesignPanel design={design} onChange={setDesign} onRestore={() => setDesign(level)} onRun={startRun} />
+          )}
+          {phase.kind === 'run' && <EventLog events={phase.day.events} hour={result.hour} />}
+          {phase.kind === 'score' && <ScorePanel card={phase.card} onFix={backToDesign} onReplay={replay} />}
+        </div>
       </section>
     </main>
   );
+}
+
+/**
+ * The 3D scene is rebuilt only when something it draws changes (rooms, solar panels, main breaker label),
+ * not when a breaker or cable choice changes.
+ */
+function useLayout(d: VillaData): VillaData {
+  const key = JSON.stringify([d.circuits.map(c => [c.id, c.room]), d.solarKw, d.supply.mainBreakerA, d.orientation]);
+  const [kept, setKept] = useState({ key, d });
+  if (kept.key !== key) {
+    setKept({ key, d });
+    return d;
+  }
+  return kept.d;
 }

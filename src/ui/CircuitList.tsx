@@ -12,7 +12,7 @@ interface Props {
 /** Live circuit schedule. Clicking a row fades that room's walls, same as clicking the room. */
 export function CircuitList({ result, selected, onSelect }: Props) {
   return (
-    <aside className="circuits">
+    <section className="panel circuits">
       <header>
         <h2>Circuits</h2>
         <span className="legend">
@@ -46,7 +46,7 @@ export function CircuitList({ result, selected, onSelect }: Props) {
         <span>Main breaker</span>
         <b>{result.main.tripped ? 'TRIPPED' : `${fmt(result.main.amps)} A of ${result.main.ratingA} A`}</b>
       </p>
-    </aside>
+    </section>
   );
 }
 
