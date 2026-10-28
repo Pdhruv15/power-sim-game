@@ -14,7 +14,7 @@ A level opens once the one before it has at least one star. Best results are kep
 Every level sits on a floating block of land in an open sky, like a model on a table. The tile's cut sides show the
 ground layers (topsoil, sand, rock) and the buried supply cable that brings power from the street network. On top
 is a small village: a street with lamps that light up at dusk, palms and shade trees, lawns and footpaths, and a pond.
-The sky follows the time of day, with stars at night and clouds drifting around the tile. The view stays over the
+The sky follows the time of day, with stars at night. The view stays over the
 tile. The scenery is decoration only; it never changes the results.
 
 ## Run it
@@ -107,7 +107,7 @@ src/game/                game rules: pure TypeScript, like src/sim
   hints.ts               Learn mode: each room's highest current
 src/render/SiteScene.ts  Three.js site: villas, flats, feeder pillar, riser, cables. Reads results only.
 src/render/Landscape.ts  the land tile, street, lamps, trees, lawns and pond (landscapeLayout.ts places them, tested)
-src/render/Sky.ts        gradient sky dome, stars and clouds
+src/render/Sky.ts        gradient sky dome and stars
 src/ui/                  React HUD and app shell
 ```
 

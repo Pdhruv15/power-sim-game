@@ -85,7 +85,6 @@ export class SiteScene {
   private supply: { mat: THREE.MeshBasicMaterial; labelObj: CSS2DObject } | null = null;
   /** Furthest the view may pan from the site centre. */
   private panLimit = 30;
-  private lastT = 0;
   private span = 20;
   private clock = new THREE.Clock();
   private resizeObserver: ResizeObserver;
@@ -238,7 +237,7 @@ export class SiteScene {
     this.scene.add(this.hemi, fill, this.sunLight, this.sunLight.target, this.sunDisc);
 
     // Sky all round the floating tile. The tile itself is the ground (see Landscape).
-    this.sky = new Sky(SKY_RADIUS, s * 2);
+    this.sky = new Sky(SKY_RADIUS);
     this.scene.add(this.sky.group);
   }
 
@@ -498,8 +497,6 @@ export class SiteScene {
 
   private frame = (): void => {
     const t = this.clock.getElapsedTime();
-    const dt = t - this.lastT;
-    this.lastT = t;
     this.keepViewOnTile();
     this.controls.update();
     for (const [id, rm] of this.rooms) {
@@ -509,7 +506,6 @@ export class SiteScene {
     }
     if (!this.reduceMotion) {
       this.landscape?.tick(t);
-      this.sky?.tick(dt);
       for (const p of [...this.rooms.values(), ...this.boards.values()]) {
         if (!p.marker.visible) continue;
         p.marker.rotation.y = t * 2;
