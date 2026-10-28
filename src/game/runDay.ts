@@ -1,9 +1,10 @@
-import { BANDS, Simulator, topBoard, type Level, type PhaseAmps, type SimResult } from '../sim';
+import { BANDS, Simulator, topBoard, type FaultResult, type Level, type PhaseAmps, type SimResult } from '../sim';
+import { fmt } from './format';
 
 /** Fixed step for a scored day: 3 minutes, 480 frames. The same frames drive the replay. */
 export const DAY_STEP_HOURS = 0.05;
 
-export type DayEventKind = 'trip' | 'board-trip' | 'main-trip' | 'high';
+export type DayEventKind = 'trip' | 'board-trip' | 'main-trip' | 'high' | 'fault';
 
 export interface DayEvent {
   hour: number;
@@ -30,6 +31,11 @@ export interface WorstDrop {
   hour: number;
 }
 
+export interface DayFault extends FaultResult {
+  hour: number;
+  text: string;
+}
+
 export interface DayRun {
   /** One result per step from 00:00 to 24:00 inclusive. */
   frames: SimResult[];
@@ -48,6 +54,10 @@ export interface DayRun {
   mainTripHour: number | null;
   /** Peak of the top board. */
   mainPeak: BoardPeak;
+  /** Short circuits from the level file and how the breakers handled them. */
+  faults: DayFault[];
+  /** Breakers opened by a short circuit rather than by overload. */
+  faultTripped: Set<string>;
 }
 
 /** Run a whole day from midnight with fresh breakers and record what happened. */
@@ -63,6 +73,12 @@ export function runDay(level: Level): DayRun {
   const drops = new Map<string, WorstDrop>();
   const tripHour = new Map<string, number>();
   const warned = new Set<string>();
+  const faults: DayFault[] = [];
+  /** Rooms with a shorted cable: off for the rest of the day, and not counted as lost supply. */
+  const faulted = new Set<string>();
+  const faultTripped = new Set<string>();
+  const pending = [...level.faults].sort((a, b) => a.hour - b.hour);
+  const name = (id: string) => level.circuits.find(c => c.id === id)?.room ?? level.boards.find(b => b.id === id)?.name ?? id;
 
   for (let i = 0; i <= steps; i++) {
     const hour = i * DAY_STEP_HOURS;
@@ -72,6 +88,7 @@ export function runDay(level: Level): DayRun {
 
     const dt = DAY_STEP_HOURS;
     for (const c of r.circuits) {
+      if (faulted.has(c.id)) continue;
       energy.demand += c.demandKw * dt;
       energy.supplied += c.kw * dt;
       if (c.loading > (peaks.get(c.id)?.loading ?? -1)) peaks.set(c.id, { loading: c.loading, amps: c.demandA, hour });
@@ -91,6 +108,20 @@ export function runDay(level: Level): DayRun {
     energy.solarUsed += Math.min(r.solarKw, r.loadKw) * dt;
     energy.grid += Math.max(0, r.gridKw) * dt;
     energy.exported += Math.max(0, -r.gridKw) * dt;
+
+    // Short circuits due by the start of this step happen before time moves on
+    while (pending.length && pending[0].hour <= hour + 1e-9) {
+      const f = pending.shift()!;
+      const res = sim.fault(f.circuit);
+      faulted.add(f.circuit);
+      faults.push({ ...res, hour: f.hour, text: f.text });
+      for (const id of res.tripped) { tripHour.set(id, f.hour); faultTripped.add(id); }
+      const opened = res.tripped.map(name).join(', ') || 'nothing';
+      events.push({
+        hour: f.hour, kind: 'fault', target: f.circuit,
+        text: `${f.text}: ${fmt(res.amps, 0)} A. ${res.instant ? 'Opened at once' : `Took ${fmt(res.seconds)} s to clear`}: ${opened}`,
+      });
+    }
 
     sim.advance(dt);
 
@@ -113,6 +144,6 @@ export function runDay(level: Level): DayRun {
 
   return {
     frames, events, energy, peaks, boardPeaks, drops, tripHour,
-    mainTripHour: tripHour.get(topId) ?? null, mainPeak: boardPeaks.get(topId)!,
+    mainTripHour: tripHour.get(topId) ?? null, mainPeak: boardPeaks.get(topId)!, faults, faultTripped,
   };
 }

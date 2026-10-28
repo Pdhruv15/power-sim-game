@@ -164,3 +164,59 @@ describe('Level 2: two villas', () => {
     expect(designCost(l) - before).toBe(425); // (15 − 10) credits/m × 85 m
   });
 });
+
+describe('Level 3: apartment building', () => {
+  const building = (): Level =>
+    parseLevel(JSON.parse(readFileSync(new URL('../../public/data/building.json', import.meta.url), 'utf8')));
+  /** Flats A, B, C on L1, L2, L3, and a riser cable that can carry its breaker. */
+  function fixedBuilding(flat2B: { breakerA: number; mm2: number }): Level {
+    const l = building();
+    const ph = { A: 'L1', B: 'L2', C: 'L3' } as const;
+    for (const b of l.boards) if (b.phases === 1) b.phase = ph[b.id[1] as keyof typeof ph];
+    l.boards.find(b => b.id === 'F2')!.cable = { mm2: 35, lengthM: 10 };
+    Object.assign(l.boards.find(b => b.id === '2B')!, { breakerA: flat2B.breakerA, cable: { mm2: flat2B.mm2, lengthM: 20 } });
+    return l;
+  }
+
+  it('scores the starting wiring at 1 star', () => {
+    const s = score(building());
+    expect(s.total).toBe(513);
+    expect(s.stars).toBe(1);
+    const titles = s.lessons.map(l => l.title);
+    expect(titles).toContain('Main breaker too small');
+    expect(titles).toContain('Breaker bigger than the feeder cable: Floor 2 board');
+    expect(titles).toContain('Too many breakers tripped: Kitchen');
+    // A breaker opened by the short is not mistaken for an undersized one
+    expect(titles).not.toContain('Feeder breaker too small: Flat 2B');
+    expect(titles).not.toContain('Breaker too small: Kitchen');
+  });
+
+  it('loses half the protection points when the flat breaker also opens', () => {
+    const s = score(fixedBuilding({ breakerA: 50, mm2: 10 }));
+    expect(s.parts.find(p => p.key === 'protection')!.points).toBe(100);
+    expect(s.total).toBe(895);
+  });
+
+  it('gives full marks when only the kitchen breaker opens', () => {
+    const s = score(fixedBuilding({ breakerA: 63, mm2: 16 }));
+    expect(s.total).toBe(1000);
+    expect(s.stars).toBe(3);
+    expect(s.lessons.map(l => l.title)).toContain('Only the faulty room went off: Kitchen');
+  });
+
+  it('calls a slow fault clearance a mistake', () => {
+    const l = fixedBuilding({ breakerA: 63, mm2: 16 });
+    // 16 A on 1.5 mm² is safe for the cable, but 120 m keeps the fault current under the 80 A instant trip
+    Object.assign(l.circuits.find(c => c.id === '2B-3')!, { breakerA: 16, cableMm2: 1.5, lengthM: 120 });
+    const s = score(l);
+    expect(s.lessons.filter(x => x.kind === 'mistake').map(x => x.title)).toEqual(['Short circuit not cleared at once: Kitchen']);
+    expect(s.parts.find(p => p.key === 'protection')!.points).toBe(0);
+    expect(s.stars).toBeLessThan(3);
+  });
+
+  it('logs the short circuit as an event', () => {
+    const e = runDay(building()).events.find(x => x.kind === 'fault')!;
+    expect(e.hour).toBeCloseTo(19.5);
+    expect(e.text).toMatch(/518 A\. Opened at once: Kitchen, Flat 2B/);
+  });
+});

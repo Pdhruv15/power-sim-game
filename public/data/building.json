@@ -1,0 +1,59 @@
+{
+  "id": "level-3-building",
+  "title": "Apartment building",
+  "project": "Six-flat building, two floors",
+  "intro": "A main board feeds a board on each floor through a riser, and each floor board feeds three flats. Every flat was put on L1. At 19:30 a kettle lead will short in the kitchen of flat 2B: only that kitchen's breaker should trip, at once. A room breaker trips at once from 5 × its rating, a board breaker from 10 ×.",
+  "orientation": 0,
+  "supply": {
+    "voltage": 230,
+    "sourceOhms": 0.12
+  },
+  "budget": 3900,
+  "points": {
+    "supply": 250,
+    "safety": 150,
+    "loading": 100,
+    "voltage": 100,
+    "balance": 100,
+    "protection": 200,
+    "cost": 100
+  },
+  "faults": [
+    {
+      "hour": 19.5,
+      "circuit": "2B-3",
+      "text": "A kettle lead shorts in the kitchen of flat 2B"
+    }
+  ],
+  "boards": [
+    { "id": "MDB", "name": "Main board", "parent": null, "breakerA": 160, "phases": 3, "floor": 0 },
+    { "id": "F1", "name": "Floor 1 board", "parent": "MDB", "breakerA": 100, "phases": 3, "floor": 0, "cable": { "mm2": 35, "lengthM": 6 } },
+    { "id": "F2", "name": "Floor 2 board", "parent": "MDB", "breakerA": 100, "phases": 3, "floor": 1, "cable": { "mm2": 25, "lengthM": 10 } },
+    { "id": "1A", "name": "Flat 1A", "parent": "F1", "breakerA": 40, "phases": 1, "phase": "L1", "floor": 0, "cable": { "mm2": 10, "lengthM": 14 } },
+    { "id": "1B", "name": "Flat 1B", "parent": "F1", "breakerA": 40, "phases": 1, "phase": "L1", "floor": 0, "cable": { "mm2": 10, "lengthM": 20 } },
+    { "id": "1C", "name": "Flat 1C", "parent": "F1", "breakerA": 40, "phases": 1, "phase": "L1", "floor": 0, "cable": { "mm2": 10, "lengthM": 26 } },
+    { "id": "2A", "name": "Flat 2A", "parent": "F2", "breakerA": 40, "phases": 1, "phase": "L1", "floor": 1, "cable": { "mm2": 10, "lengthM": 14 } },
+    { "id": "2B", "name": "Flat 2B", "parent": "F2", "breakerA": 40, "phases": 1, "phase": "L1", "floor": 1, "cable": { "mm2": 10, "lengthM": 20 } },
+    { "id": "2C", "name": "Flat 2C", "parent": "F2", "breakerA": 40, "phases": 1, "phase": "L1", "floor": 1, "cable": { "mm2": 10, "lengthM": 26 } }
+  ],
+  "circuits": [
+    { "id": "1A-1", "board": "1A", "room": "Living", "type": "ac", "kw": 3.0, "breakerA": 20, "cableMm2": 2.5, "lengthM": 15 },
+    { "id": "1A-2", "board": "1A", "room": "Bedroom", "type": "ac", "kw": 2.4, "breakerA": 16, "cableMm2": 2.5, "lengthM": 18 },
+    { "id": "1A-3", "board": "1A", "room": "Kitchen", "type": "sockets", "kw": 3.0, "breakerA": 20, "cableMm2": 2.5, "lengthM": 12 },
+    { "id": "1B-1", "board": "1B", "room": "Living", "type": "ac", "kw": 3.0, "breakerA": 20, "cableMm2": 2.5, "lengthM": 15 },
+    { "id": "1B-2", "board": "1B", "room": "Bedroom", "type": "ac", "kw": 2.4, "breakerA": 16, "cableMm2": 2.5, "lengthM": 18 },
+    { "id": "1B-3", "board": "1B", "room": "Kitchen", "type": "sockets", "kw": 3.0, "breakerA": 20, "cableMm2": 2.5, "lengthM": 12 },
+    { "id": "1C-1", "board": "1C", "room": "Living", "type": "ac", "kw": 3.0, "breakerA": 20, "cableMm2": 2.5, "lengthM": 15 },
+    { "id": "1C-2", "board": "1C", "room": "Bedroom", "type": "ac", "kw": 2.4, "breakerA": 16, "cableMm2": 2.5, "lengthM": 18 },
+    { "id": "1C-3", "board": "1C", "room": "Kitchen", "type": "sockets", "kw": 3.0, "breakerA": 20, "cableMm2": 2.5, "lengthM": 12 },
+    { "id": "2A-1", "board": "2A", "room": "Living", "type": "ac", "kw": 3.0, "breakerA": 20, "cableMm2": 2.5, "lengthM": 15 },
+    { "id": "2A-2", "board": "2A", "room": "Bedroom", "type": "ac", "kw": 2.4, "breakerA": 16, "cableMm2": 2.5, "lengthM": 18 },
+    { "id": "2A-3", "board": "2A", "room": "Kitchen", "type": "sockets", "kw": 3.0, "breakerA": 20, "cableMm2": 2.5, "lengthM": 12 },
+    { "id": "2B-1", "board": "2B", "room": "Living", "type": "ac", "kw": 3.0, "breakerA": 20, "cableMm2": 2.5, "lengthM": 15 },
+    { "id": "2B-2", "board": "2B", "room": "Bedroom", "type": "ac", "kw": 2.4, "breakerA": 16, "cableMm2": 2.5, "lengthM": 18 },
+    { "id": "2B-3", "board": "2B", "room": "Kitchen", "type": "sockets", "kw": 3.0, "breakerA": 20, "cableMm2": 2.5, "lengthM": 12 },
+    { "id": "2C-1", "board": "2C", "room": "Living", "type": "ac", "kw": 3.0, "breakerA": 20, "cableMm2": 2.5, "lengthM": 15 },
+    { "id": "2C-2", "board": "2C", "room": "Bedroom", "type": "ac", "kw": 2.4, "breakerA": 16, "cableMm2": 2.5, "lengthM": 18 },
+    { "id": "2C-3", "board": "2C", "room": "Kitchen", "type": "sockets", "kw": 3.0, "breakerA": 20, "cableMm2": 2.5, "lengthM": 12 }
+  ]
+}

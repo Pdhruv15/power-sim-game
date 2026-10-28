@@ -7,6 +7,9 @@ import { skyColor, STATUS, statusColor } from './colors';
 // Plan dimensions in metres. Each villa has two rows of rooms either side of a corridor, one room per circuit.
 const ROOM = 4.4, WALL_H = 2.8, WALL_T = 0.14, CORRIDOR = 1.4, DOOR = 1.0, BASE = 0.2;
 const VILLA_GAP = 7;             // between villas
+const FLAT_GAP = 0.3;            // between flats in a building
+const FLOOR_H = BASE + WALL_H + 0.25; // storey height
+const RISER_SETBACK = 1.8;       // riser and boards beside the building's west end
 const PILLAR_SETBACK = 6;        // feeder pillar distance in front of the villas
 const PANEL_KW = 0.55;           // one PV panel
 const PANEL_TILT = 20;           // degrees
@@ -70,7 +73,6 @@ export class SiteScene {
     // Isometric-style orthographic camera; OrbitControls gives rotate, zoom and pan.
     this.camera.position.set(24, 22, 26);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.target.set(0, 1, 0);
     this.controls.enableDamping = true;
     this.controls.maxPolarAngle = Math.PI * 0.47; // stay above ground
     this.controls.minZoom = 0.6;
@@ -173,56 +175,75 @@ export class SiteScene {
     this.scene.add(ground);
   }
 
-  /** Villas in a row, feeder pillar in front, buried feeder cables from the pillar to each villa's board. */
+  /**
+   * Units (villas or flats) in a row per floor. Villas stand apart with a feeder pillar in front;
+   * flats in a building sit side by side, floors stacked, with the main and floor boards on a riser at the west end.
+   */
   private buildSite(level: Level): void {
-    const villas = level.boards.filter(b => level.circuits.some(c => c.board === b.id));
-    const sizes = villas.map(b => villaSize(level.circuits.filter(c => c.board === b.id).length));
-    const rowW = sizes.reduce((s, v) => s + v.W, 0) + VILLA_GAP * (villas.length - 1);
-    const maxD = Math.max(...sizes.map(v => v.D));
+    const building = level.boards.some(b => b.floor !== undefined && b.floor > 0);
+    const gap = building ? FLAT_GAP : VILLA_GAP;
+    const units = level.boards.filter(b => level.circuits.some(c => c.board === b.id));
+    const floorOf = (b: Board) => b.floor ?? 0;
+    const topFloor = Math.max(...units.map(floorOf));
+    const sizeOf = new Map(units.map(b => [b.id, villaSize(level.circuits.filter(c => c.board === b.id).length)]));
+    const floors = [...new Set(units.map(floorOf))].sort((a, b) => a - b);
+    const rowWidth = (f: number) => {
+      const row = units.filter(b => floorOf(b) === f);
+      return row.reduce((s, b) => s + sizeOf.get(b.id)!.W, 0) + gap * (row.length - 1);
+    };
+    const rowW = Math.max(...floors.map(rowWidth));
+    const maxD = Math.max(...units.map(b => sizeOf.get(b.id)!.D));
     this.site.rotation.y = -THREE.MathUtils.degToRad(level.orientation); // clockwise from north
     this.scene.add(this.site);
 
-    // Where each villa's board sits, in site coordinates
+    // Where each board sits, in site coordinates
     const dbAt = new Map<string, THREE.Vector3>();
-    let x = -rowW / 2;
-    villas.forEach((b, i) => {
-      const { W } = sizes[i];
-      const g = new THREE.Group();
-      g.position.x = x + W / 2;
-      this.site.add(g);
-      const db = this.buildVilla(g, b, level.circuits.filter(c => c.board === b.id), villas.length > 1);
-      dbAt.set(b.id, db.add(g.position));
-      x += W + VILLA_GAP;
-    });
+    for (const f of floors) {
+      let x = -rowWidth(f) / 2;
+      for (const b of units.filter(u => floorOf(u) === f)) {
+        const { W } = sizeOf.get(b.id)!;
+        const g = new THREE.Group();
+        g.position.set(x + W / 2, f * FLOOR_H, 0);
+        this.site.add(g);
+        const db = this.buildVilla(g, b, level.circuits.filter(c => c.board === b.id), units.length > 1, floorOf(b) === topFloor);
+        dbAt.set(b.id, db.add(g.position));
+        x += W + gap;
+      }
+    }
 
-    // Boards without rooms (feeder pillar, later sub-mains) stand in front of the villas
+    // Boards without rooms: a feeder pillar in front of villas, or main and floor boards on the building's riser
     const others = level.boards.filter(b => !dbAt.has(b.id));
     others.forEach((b, i) => {
-      const at = new THREE.Vector3((i - (others.length - 1) / 2) * 4, 0, maxD / 2 + PILLAR_SETBACK);
-      box(0.9, 1.4, 0.5, mat(0x6f7a85, { metalness: 0.3 }), at.x, 0.7, at.z, this.site);
+      const at = building
+        ? new THREE.Vector3(-rowW / 2 - RISER_SETBACK, floorOf(b) * FLOOR_H, b.parent === null ? 2.5 : 0)
+        : new THREE.Vector3((i - (others.length - 1) / 2) * 4, 0, maxD / 2 + PILLAR_SETBACK);
+      box(0.9, 1.4, 0.5, mat(0x6f7a85, { metalness: 0.3 }), at.x, at.y + 0.7, at.z, this.site);
       dbAt.set(b.id, at);
-      this.boards.set(b.id, this.boardParts(b, new THREE.Vector3(at.x, 2.2, at.z), null));
+      this.boards.set(b.id, this.boardParts(b, new THREE.Vector3(at.x, at.y + 2.2, at.z), null));
     });
 
-    // Feeder cables, drawn as buried trenches: along the front, then straight to the board
+    // Feeder cables: up the riser to the child's floor, along the parent's line, then across to the child's board
     for (const b of level.boards) {
       if (!b.parent) continue;
       const from = dbAt.get(b.parent)!, to = dbAt.get(b.id)!;
       const cableMat = new THREE.MeshBasicMaterial({ color: STATUS.ok });
-      const y = 0.06, frontZ = maxD / 2 + 1.2;
-      box(0.18, 0.06, Math.abs(from.z - frontZ), cableMat, from.x, y, (from.z + frontZ) / 2, this.site, false);
-      box(Math.abs(to.x - from.x) + 0.18, 0.06, 0.18, cableMat, (from.x + to.x) / 2, y, frontZ, this.site, false);
-      box(0.18, 0.06, Math.abs(frontZ - to.z), cableMat, to.x, y, (frontZ + to.z) / 2, this.site, false);
+      const lift = building ? BASE + 0.1 : 0.06;
+      const y0 = from.y + lift, y1 = to.y + lift, t = 0.18;
+      if (Math.abs(y1 - y0) > 0.01) box(t, Math.abs(y1 - y0), t, cableMat, from.x, (y0 + y1) / 2, from.z, this.site, false);
+      box(Math.abs(to.x - from.x) + t, t / 3, t, cableMat, (from.x + to.x) / 2, y1, from.z, this.site, false);
+      box(t, t / 3, Math.abs(from.z - to.z) + t, cableMat, to.x, y1, (from.z + to.z) / 2, this.site, false);
       const parts = this.boards.get(b.id);
       if (parts) parts.cableMat = cableMat;
     }
 
-    this.span = Math.max(rowW, maxD + (others.length ? PILLAR_SETBACK * 2 : 0));
+    const height = (topFloor + 1) * FLOOR_H;
+    this.span = Math.max(rowW + (building ? RISER_SETBACK * 2 : 0), maxD + (others.length && !building ? PILLAR_SETBACK * 2 : 0), height * 1.4);
+    this.controls.target.set(0, height / 2, 0);
     this.addLabel(this.scene, 'N ↑', new THREE.Vector3(0, 0, -maxD / 2 - 4), 'scene-label tag'); // north is world −z
   }
 
   /** One villa, centred on its group. Returns where its board sits, in the group's coordinates. */
-  private buildVilla(g: THREE.Group, board: Board, circuits: Circuit[], showName: boolean): THREE.Vector3 {
+  private buildVilla(g: THREE.Group, board: Board, circuits: Circuit[], showName: boolean, withRoof: boolean): THREE.Vector3 {
     const cols = Math.ceil(circuits.length / 2);
     const { W, D } = villaSize(circuits.length);
 
@@ -278,7 +299,7 @@ export class SiteScene {
       this.rooms.set(c.id, { floorMat, wallMat, bandMat, cableMat, marker, markerY, label });
     });
 
-    this.buildRoof(g, W, D, board.solarKw);
+    if (withRoof) this.buildRoof(g, W, D, board.solarKw);
     return new THREE.Vector3(dbX, 0, 0);
   }
 

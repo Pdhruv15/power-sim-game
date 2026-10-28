@@ -7,7 +7,7 @@ import { App } from './App';
 
 // jsdom gives import.meta.url an http scheme, so read the level from the project root
 const file = (name: string) => readFileSync(resolve(process.cwd(), 'public/data', name), 'utf8');
-const LEVEL_FILES: Record<string, string> = { 'villa.json': file('villa.json'), 'two-villas.json': file('two-villas.json') };
+const LEVEL_FILES: Record<string, string> = Object.fromEntries(['villa.json', 'two-villas.json', 'building.json'].map(n => [n, file(n)]));
 
 beforeEach(() => {
   localStorage.clear();
@@ -67,6 +67,21 @@ describe('Level 1 flow', () => {
     runAndSkip();
     expect(scorePanel().getByText(/Main breaker too small/)).toBeTruthy();
     expect(scorePanel().getByText(/Phases unbalanced: Villa A/)).toBeTruthy();
+  });
+
+  it('plays Level 3 with the short-circuit hint', async () => {
+    localStorage.setItem('power-sim:progress:v1', JSON.stringify({
+      'level-1-villa': { score: 905, stars: 3 }, 'level-2-two-villas': { score: 800, stars: 2 },
+    }));
+    render(<App />);
+    await screen.findByRole('button', { name: 'Run the day' });
+    fireEvent.click(screen.getByRole('button', { name: /Level 3/ }));
+    expect(await screen.findByText(/Short circuit here at 19:30: about 518 A/)).toBeTruthy();
+    expect(document.getElementById('ph-2B')).toBeTruthy(); // each flat picks its phase
+
+    runAndSkip();
+    expect(scorePanel().getByText('513')).toBeTruthy();
+    expect(scorePanel().getByText(/Too many breakers tripped: Kitchen/)).toBeTruthy();
   });
 
   it('shows level file problems instead of a blank screen', async () => {

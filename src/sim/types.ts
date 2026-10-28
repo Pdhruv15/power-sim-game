@@ -29,6 +29,18 @@ export interface Board {
   cable: Cable | null;
   /** Solar PV connected at this board, in kWp. */
   solarKw: number;
+  /** Phase a single-phase board is connected to on a three-phase parent. */
+  phase: Phase;
+  /** Storey for drawing (0 = ground). Boards without a floor stand outside. */
+  floor?: number;
+}
+
+/** A short circuit at the end of a room's cable, at a set time of day. */
+export interface FaultEvent {
+  hour: number;
+  circuit: string;
+  /** What happened, in plain words, e.g. "A kettle lead shorts". */
+  text: string;
 }
 
 /** One final circuit. Each circuit serves one room. */
@@ -66,6 +78,9 @@ export interface Level {
   budget?: number;
   /** Points available per score part. Parts left out are not scored. */
   points?: Record<string, number>;
+  /** Resistance of the supply itself (transformer and street cable), in ohms. Limits short-circuit current. */
+  sourceOhms: number;
+  faults: FaultEvent[];
 }
 
 /** The board fed from the grid. parseLevel guarantees there is exactly one. */
@@ -73,8 +88,8 @@ export const topBoard = (level: Level): Board => level.boards.find(b => b.parent
 
 export const totalSolarKw = (level: Level): number => level.boards.reduce((s, b) => s + b.solarKw, 0);
 
-/** Phase a circuit really uses: a single-phase board only has L1. */
+/** Phase a circuit really uses: its own on a three-phase board, otherwise the single-phase board's phase. */
 export function phaseIndex(level: Level, c: Circuit): 0 | 1 | 2 {
   const board = level.boards.find(b => b.id === c.board);
-  return board?.phases === 3 ? (PHASES.indexOf(c.phase) as 0 | 1 | 2) : 0;
+  return PHASES.indexOf(board?.phases === 3 ? c.phase : (board?.phase ?? 'L1')) as 0 | 1 | 2;
 }

@@ -72,7 +72,7 @@ function BoardRow({ b }: { b: BoardResult }) {
       <span className="dot" />
       <span className="nm">
         <b>{b.name}</b>
-        <small>{b.ratingA} A breaker{b.vdPct > 0 && ` · drop ${fmt(b.vdPct)} %`}</small>
+        <small>{b.ratingA} A breaker{b.phases === 1 && b.parent !== null && ` · on ${b.phase}`}{b.vdPct > 0 && ` · drop ${fmt(b.vdPct)} %`}</small>
       </span>
       <span className="val">
         <b>{b.tripped ? 'TRIPPED' : b.dead ? 'no supply' : `${fmt(b.loading * 100, 0)}%`}</b>
