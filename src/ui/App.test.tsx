@@ -84,6 +84,24 @@ describe('Level 1 flow', () => {
     expect(scorePanel().getByText(/Too many breakers tripped: Kitchen/)).toBeTruthy();
   });
 
+  it('offers label modes everywhere and a floor choice for the building', async () => {
+    localStorage.setItem('power-sim:progress:v1', JSON.stringify({
+      'level-1-villa': { score: 905, stars: 3 }, 'level-2-two-villas': { score: 800, stars: 2 },
+    }));
+    render(<App />);
+    await screen.findByRole('button', { name: 'Run the day' });
+    const labels = within(screen.getByRole('group', { name: 'Labels' }));
+    expect(labels.getByRole('button', { name: 'Smart' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(labels.getByRole('button', { name: 'All' }));
+    expect(labels.getByRole('button', { name: 'All' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.queryByRole('group', { name: 'Floors' })).toBeNull(); // one-storey villa
+
+    fireEvent.click(screen.getByRole('button', { name: /Level 3/ }));
+    const floors = within(await screen.findByRole('group', { name: 'Floors' }));
+    fireEvent.click(floors.getByRole('button', { name: '1' }));
+    expect(floors.getByRole('button', { name: '1' }).getAttribute('aria-pressed')).toBe('true');
+  });
+
   it('shows level file problems instead of a blank screen', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"project":"x"}', { status: 200 })));
     render(<App />);

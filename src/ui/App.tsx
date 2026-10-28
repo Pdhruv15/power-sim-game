@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { LabelMode } from '../render/labelRules';
 import { DAY_STEP_HOURS, runDay, scoreDay, type DayRun, type ScoreCard } from '../game';
 import { LevelError, parseLevel, Simulator, topBoard, totalSolarKw, type Level } from '../sim';
 import { CircuitList } from './CircuitList';
@@ -11,6 +12,7 @@ import { ScorePanel } from './ScorePanel';
 import { Stage } from './Stage';
 import { TimeControls } from './TimeControls';
 import { useAnimationClock } from './useAnimationClock';
+import { ViewBar } from './ViewBar';
 
 const START_HOUR = 12;
 /** Simulated hours per real second: free exploring, and the scored day replay (24 h in 12 s). */
@@ -93,6 +95,9 @@ function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
   const [playing, setPlaying] = useState(false);
   const [roofOn, setRoofOn] = useState(false);
   const [faded, setFaded] = useState<ReadonlySet<string>>(new Set());
+  const [labelMode, setLabelMode] = useState<LabelMode>('smart');
+  const [floorLimit, setFloorLimit] = useState<number | null>(null);
+  const floors = 1 + Math.max(0, ...level.boards.filter(b => level.circuits.some(c => c.board === b.id)).map(b => b.floor ?? 0));
 
   // Explore: a free simulator over the current design. Rebuilt when the design changes, keeping the time.
   const exploreHour = useRef(START_HOUR);
@@ -175,9 +180,13 @@ function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
       <section className="sim">
         <div className="stage-col">
           <div className="stage-wrap">
-            <Stage level={layout} result={result} roofOn={roofOn} faded={faded} onRoomClick={toggleRoom} />
+            <Stage
+              level={layout} result={result} roofOn={roofOn} faded={faded} labelMode={labelMode} floorLimit={floorLimit}
+              onRoomClick={toggleRoom}
+            />
             <Kpis result={result} solarKwp={pv} />
-            <p className="hint">Drag to rotate · scroll to zoom · right-drag to pan · click a room to see inside</p>
+            <ViewBar labelMode={labelMode} onLabelMode={setLabelMode} floors={floors} floorLimit={floorLimit} onFloorLimit={setFloorLimit} />
+            <p className="hint">Drag to rotate · scroll to zoom · right-drag to pan · point at a room for details</p>
           </div>
           <TimeControls
             mode={phase.kind === 'design' ? 'explore' : phase.kind === 'run' ? 'run' : 'result'}
