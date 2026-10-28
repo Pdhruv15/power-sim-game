@@ -1,9 +1,9 @@
-import { NEW_BREAKER, stepBreaker, type BreakerState } from './breaker';
-import { cableDropV } from './cables';
+import { BOARD_INSTANT_TRIP, hoursToTrip, INSTANT_TRIP, NEW_BREAKER, stepBreaker, type BreakerState } from './breaker';
+import { cableDropV, loopOhms } from './cables';
 import { branchCurrents, levelNetwork, maxPhase, onPhase, type Network, type PhaseAmps } from './network';
 import { POWER_FACTOR, profileAt, wrapHour } from './profiles';
 import { pvOutput, sunAt, type Sun } from './sun';
-import { topBoard, type LoadType, type Level, type Phase } from './types';
+import { PHASES, topBoard, type LoadType, type Level, type Phase } from './types';
 
 /** Loading bands as a fraction of breaker rating: green < 60 %, orange 60–90 %, red > 90 %. */
 export const BANDS = { warn: 0.6, high: 0.9 } as const;
@@ -45,6 +45,8 @@ export interface BoardResult {
   name: string;
   parent: string | null;
   phases: 1 | 3;
+  /** Phase a single-phase board is connected to. */
+  phase: Phase;
   /** Current on L1, L2, L3. Negative when solar exports through this board. */
   phaseAmps: PhaseAmps;
   /** Highest phase current: what the board's breaker sees. */
@@ -61,6 +63,23 @@ export interface BoardResult {
   /** (highest − lowest phase) ÷ highest, for three-phase boards. 0 = balanced. */
   imbalance: number;
   solarKw: number;
+}
+
+/** What happened when a room's cable shorted. */
+export interface FaultResult {
+  circuit: string;
+  /** Short-circuit current at the room, in amps. */
+  amps: number;
+  /** Breakers that opened, nearest first. */
+  tripped: string[];
+  /** True when at least one breaker opened at once. */
+  instant: boolean;
+  /** How long the fault lasted. */
+  seconds: number;
+  /** The breaker nearest the fault opened, and nothing upstream did. */
+  selective: boolean;
+  /** Breakers on the path from the room to the supply, nearest first, with the current each needs to trip at once. */
+  path: { id: string; instantA: number }[];
 }
 
 export interface SimResult {
@@ -109,7 +128,8 @@ export class Simulator {
       for (const node of this.network.nodes) {
         if (!node.breakerA) continue;
         const loading = maxPhase(flow.branch.get(node.id)!) / node.breakerA;
-        this.breakers.set(node.id, stepBreaker(this.breaker(node.id), loading, dt));
+        const instant = node.kind === 'board' ? BOARD_INSTANT_TRIP : INSTANT_TRIP;
+        this.breakers.set(node.id, stepBreaker(this.breaker(node.id), loading, dt, instant));
       }
       this.hour = wrapHour(this.hour + dt);
       left -= dt;
@@ -118,6 +138,51 @@ export class Simulator {
 
   resetBreakers(): void {
     this.breakers.clear();
+  }
+
+  /** Short-circuit current at the end of a room's cable: supply voltage ÷ resistance of the whole loop. */
+  faultAmps(circuitId: string): number {
+    const c = this.level.circuits.find(x => x.id === circuitId)!;
+    let ohms = this.level.sourceOhms + loopOhms(c.cableMm2, c.lengthM);
+    for (let b = this.board(c.board); b; b = b.parent ? this.board(b.parent) : undefined) {
+      if (b.cable) ohms += loopOhms(b.cable.mm2, b.cable.lengthM);
+    }
+    return this.level.voltage / ohms;
+  }
+
+  /**
+   * Short the room's cable now. Every breaker on the path that sees its instant-trip current opens at once
+   * (a room breaker from 5 × its rating, a board breaker from 10 ×). If none does, the fault heats the
+   * breakers until the quickest one trips, which is slow and dangerous.
+   */
+  fault(circuitId: string): FaultResult {
+    const c = this.level.circuits.find(x => x.id === circuitId)!;
+    const amps = this.faultAmps(circuitId);
+    const path = [{ id: c.id, ratingA: c.breakerA, instant: INSTANT_TRIP }];
+    for (let b = this.board(c.board); b; b = b.parent ? this.board(b.parent) : undefined) {
+      path.push({ id: b.id, ratingA: b.breakerA, instant: BOARD_INSTANT_TRIP });
+    }
+    const live = path.filter(p => !this.breaker(p.id).tripped);
+    let tripped = live.filter(p => amps >= p.ratingA * p.instant).map(p => p.id);
+    const instant = tripped.length > 0;
+    let seconds = 0.01;
+    if (!instant && live.length) {
+      // No instant trip: the breaker that heats up first opens
+      const times = live.map(p => ({ id: p.id, h: hoursToTrip(this.breaker(p.id), amps / p.ratingA) }));
+      const first = times.reduce((a, b) => (b.h < a.h ? b : a));
+      tripped = Number.isFinite(first.h) ? [first.id] : [];
+      seconds = first.h * 3600;
+    }
+    for (const id of tripped) this.breakers.set(id, { heat: 1, tripped: true });
+    return {
+      circuit: c.id, amps, tripped, instant, seconds,
+      selective: tripped.length === 1 && tripped[0] === c.id,
+      path: path.map(p => ({ id: p.id, instantA: p.ratingA * p.instant })),
+    };
+  }
+
+  private board(id: string) {
+    return this.level.boards.find(b => b.id === id);
   }
 
   result(): SimResult {
@@ -137,7 +202,7 @@ export class Simulator {
       const sizes = phaseAmps.map(Math.abs);
       const imbalance = b.phases === 3 && amps > 0 ? (Math.max(...sizes) - Math.min(...sizes)) / Math.max(...sizes) : 0;
       const r: BoardResult = {
-        id: b.id, name: b.name, parent: b.parent, phases: b.phases, phaseAmps, amps, ratingA: b.breakerA,
+        id: b.id, name: b.name, parent: b.parent, phases: b.phases, phase: b.phase, phaseAmps, amps, ratingA: b.breakerA,
         loading, band: bandOf(loading), overloaded: !dead && loading > 1, heat: state.heat, tripped: state.tripped, dead,
         vdPct: (b.parent ? byId.get(b.parent)!.vdPct : 0) + (feederDrop / V) * 100,
         imbalance, solarKw: solar.get(b.id) ?? 0,
@@ -202,14 +267,16 @@ export class Simulator {
       if (this.isLive(c.id)) injected.set(c.id, onPhase(this.level, c.id, amps));
     }
     // Solar runs only while its board is live (inverters switch off when the supply is lost).
-    // It feeds L1 on a single-phase board and all three phases equally on a three-phase board. Power factor 1.
+    // It feeds the board's phase on a single-phase board and all three phases equally on a three-phase board. Power factor 1.
     const solar = new Map<string, number>();
     for (const b of this.level.boards) {
       if (b.solarKw <= 0 || !this.isLive(b.id)) continue;
       const kw = pvOutput(b.solarKw, sun);
       solar.set(b.id, kw);
       const a = -(kw * 1000) / V;
-      injected.set(b.id, b.phases === 3 ? [a / 3, a / 3, a / 3] : [a, 0, 0]);
+      const single: PhaseAmps = [0, 0, 0];
+      single[PHASES.indexOf(b.phase)] = a;
+      injected.set(b.id, b.phases === 3 ? [a / 3, a / 3, a / 3] : single);
     }
     return { sun, solar, demand, branch: branchCurrents(this.network, injected) };
   }

@@ -7,6 +7,7 @@ one villa first, then two villas, a building, a village and a city. Good choices
 |---|---|
 | 1 · One villa | Breaker and cable sizing, daily load profiles, solar |
 | 2 · Two villas | Three-phase supply, phase balance, feeder cables, voltage drop over distance |
+| 3 · Apartment building | Main board, floor boards on a riser, flats on phases, short circuits and which breaker trips |
 
 A level opens once the one before it has at least one star. Best results are kept in the browser.
 
@@ -55,11 +56,26 @@ phase currents at its busiest time), size the feeders, and keep every room withi
 
 Level 2 scores supply 300, safety 200, healthy loading 100, voltage 150, balanced phases 150 and budget 100.
 
+## Level 3
+
+A main board feeds a board on each of two floors through a riser, and each floor board feeds three single-phase flats.
+Every flat starts on L1, the floor 2 riser cable is too small for its breaker, and at 19:30 a kettle lead shorts in
+flat 2B's kitchen. Only the kitchen breaker should open, at once.
+
+In a short circuit the current is the supply voltage divided by the resistance of the supply and every cable on the way.
+A room breaker trips at once from 5 × its rating, a board breaker from 10 ×. So the room breaker should be small enough
+to trip at once, and the boards above it big enough (on cables that can carry them) not to. The design panel shows the
+expected short-circuit current at the room and each board's instant-trip current.
+
+Level 3 scores supply 250, safety 150, healthy loading 100, voltage 100, balanced phases 100, short circuit handled 200 and budget 100.
+
 ## Level files
 
 Levels live in `public/data/`. Level 1 uses a short villa format (`supply.mainBreakerA`, `solarKw`, `circuits`).
 Other levels list `boards` (each with `parent`, `breakerA`, `phases` and a feeder `cable` of `mm2` and `lengthM`)
-and `circuits` with `board`, `phase` and `lengthM`. `points` sets which score parts a level uses.
+and `circuits` with `board`, `phase` and `lengthM`. A single-phase board on a three-phase parent sets its own `phase`,
+and `floor` stacks boards with rooms into storeys. `faults` lists short circuits (`hour`, `circuit`, `text`), and
+`supply.sourceOhms` sets the supply's own resistance. `points` sets which score parts a level uses.
 `parseLevel` checks every file and lists all problems it finds.
 
 ## Layout
@@ -91,6 +107,8 @@ src/ui/                  React HUD and app shell
 - Phase currents are added as plain numbers (no phase angles). A board breaker sees its busiest phase.
 - Voltage drop uses copper resistance only: both conductors on single-phase runs, one conductor per phase on three-phase feeders.
 - Phases count as unbalanced when the quietest phase is more than 25 % below the busiest at the board's peak.
+- Short-circuit current uses resistance only (supply plus phase and neutral of every cable). If no breaker trips at once,
+  the one that heats up first opens, and the fault counts as not cleared at once.
 - Sun rises at 06:00, sets at 18:00 and peaks at 55°. Solar output = kWp × 0.85 × sun height.
 - Solar connects at the DB and stops when the main breaker trips.
 - Cable ratings are rounded game values for copper cable in a wall: 1.5 mm² 16 A, 2.5 mm² 24 A, 4 mm² 32 A, 6 mm² 40 A, 10 mm² 55 A.

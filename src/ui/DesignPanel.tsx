@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import {
   BOARD_BREAKER_SIZES, BREAKER_SIZES, DEFAULT_POINTS, designCost, peakNeeds, SIZING_RULE, SOLAR_OPTIONS, type PeakNeed,
 } from '../game';
-import { CABLE_SIZES, cableAmps, PHASES, type Board, type Circuit, type Level, type Phase } from '../sim';
+import { BOARD_INSTANT_TRIP, CABLE_SIZES, cableAmps, INSTANT_TRIP, PHASES, Simulator, type Board, type Circuit, type Level, type Phase } from '../sim';
 import { fmt, hhmm } from './format';
 
 const TYPE_NAME = { ac: 'AC', lighting: 'Lighting', sockets: 'Sockets' } as const;
@@ -20,6 +20,13 @@ interface Props {
  */
 export function DesignPanel({ design, onChange, onRestore, onRun }: Props) {
   const needs = useMemo(() => peakNeeds(design), [design]);
+  // Learn mode for levels with a short circuit: the current that will flow at each faulty room
+  const faultAmps = useMemo(() => {
+    const sim = new Simulator(design);
+    return new Map(design.faults.map(f => [f.circuit, sim.faultAmps(f.circuit)]));
+  }, [design]);
+  const hasFaults = design.faults.length > 0;
+  const parentOf = (b: Board) => design.boards.find(x => x.id === b.parent);
   const cost = designCost(design);
   const budget = design.budget ?? null;
   const over = budget !== null && cost > budget;
@@ -48,7 +55,10 @@ export function DesignPanel({ design, onChange, onRestore, onRun }: Props) {
             <div className="board-head">
               <div className="nm">
                 <b>{isTop && design.boards.length === 1 ? 'Main breaker' : b.name}</b>
-                <small>{boardNeedText(b, need)}</small>
+                <small>
+                  {boardNeedText(b, need)}
+                  {hasFaults && ` · trips at once from ${b.breakerA * BOARD_INSTANT_TRIP} A`}
+                </small>
               </div>
               <label>
                 <span>{isTop ? 'Main breaker' : 'Feeder breaker'}</span>
@@ -61,6 +71,14 @@ export function DesignPanel({ design, onChange, onRestore, onRun }: Props) {
                   <span>Feeder cable · {b.cable.lengthM} m</span>
                   <select id={`cab-${b.id}`} value={b.cable.mm2} onChange={e => setBoard(b.id, { cable: { ...b.cable!, mm2: Number(e.target.value) } })}>
                     {CABLE_SIZES.map(mm => <option key={mm} value={mm}>{mm} mm² · {cableAmps(mm)} A</option>)}
+                  </select>
+                </label>
+              )}
+              {b.phases === 1 && parentOf(b)?.phases === 3 && (
+                <label>
+                  <span>Phase</span>
+                  <select id={`ph-${b.id}`} value={b.phase} onChange={e => setBoard(b.id, { phase: e.target.value as Phase })}>
+                    {PHASES.map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
                 </label>
               )}
@@ -85,6 +103,12 @@ export function DesignPanel({ design, onChange, onRestore, onRun }: Props) {
                         <small>
                           {TYPE_NAME[c.type]} · {c.kw} kW{c.lengthM > 0 && ` · ${c.lengthM} m`} · needs up to {fmt(n?.amps ?? 0)} A at {hhmm(n?.hour ?? 0)}
                         </small>
+                        {faultAmps.has(c.id) && (
+                          <small className="fault-hint">
+                            Short circuit here at {hhmm(design.faults.find(f => f.circuit === c.id)!.hour)}: about {fmt(faultAmps.get(c.id)!, 0)} A.
+                            {' '}This breaker trips at once from {c.breakerA * INSTANT_TRIP} A.
+                          </small>
+                        )}
                       </div>
                       <label>
                         <span>Breaker</span>
@@ -115,7 +139,13 @@ export function DesignPanel({ design, onChange, onRestore, onRun }: Props) {
         );
       })}
 
-      {hasPhases && <p className="tip">Tip: spread the rooms so L1, L2 and L3 carry about the same current at the busiest time.</p>}
+      {hasPhases && <p className="tip">Tip: spread the load so L1, L2 and L3 carry about the same current at the busiest time.</p>}
+      {hasFaults && (
+        <p className="tip">
+          In a short circuit, a room breaker trips at once from {INSTANT_TRIP} × its rating and a board breaker from {BOARD_INSTANT_TRIP} ×.
+          The room breaker should trip, and the boards above it should not.
+        </p>
+      )}
 
       <div className={`cost${over ? ' over' : ''}`}>
         <span>Cost</span>

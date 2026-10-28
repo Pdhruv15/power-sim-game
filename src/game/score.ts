@@ -6,7 +6,7 @@ import type { DayRun } from './runDay';
 /** The sizing rule every level builds on. */
 export const SIZING_RULE = 'Room current ≤ breaker ≤ cable';
 
-export type ScoreKey = 'supply' | 'safety' | 'loading' | 'voltage' | 'balance' | 'cost' | 'solar';
+export type ScoreKey = 'supply' | 'safety' | 'loading' | 'voltage' | 'balance' | 'protection' | 'cost' | 'solar';
 
 export interface ScorePart {
   key: ScoreKey;
@@ -39,9 +39,9 @@ export const DEFAULT_POINTS: Readonly<Partial<Record<ScoreKey, number>>> = { sup
 
 const LABELS: Record<ScoreKey, string> = {
   supply: 'Power kept on', safety: 'Safe design', loading: 'Healthy loading', voltage: 'Voltage at the rooms',
-  balance: 'Balanced phases', cost: 'Within budget', solar: 'Solar share',
+  balance: 'Balanced phases', protection: 'Short circuit handled', cost: 'Within budget', solar: 'Solar share',
 };
-const ORDER: ScoreKey[] = ['supply', 'safety', 'loading', 'voltage', 'balance', 'cost', 'solar'];
+const ORDER: ScoreKey[] = ['supply', 'safety', 'loading', 'voltage', 'balance', 'protection', 'cost', 'solar'];
 
 /** Each unsafe breaker costs half the safety points, each busy breaker a third of the loading points, and so on. */
 const UNSAFE_SHARE = 1 / 2;
@@ -74,8 +74,9 @@ export function scoreDay(level: Level, day: DayRun): ScoreCard {
 
   // ---- Power kept on
   points.supply = max('supply') * (day.energy.demand > 0 ? day.energy.supplied / day.energy.demand : 1);
+  const overloadTrip = (id: string) => (day.faultTripped.has(id) ? undefined : day.tripHour.get(id));
   for (const b of level.boards) {
-    const at = day.tripHour.get(b.id);
+    const at = overloadTrip(b.id);
     if (at === undefined) continue;
     const p = day.boardPeaks.get(b.id)!;
     const isMain = b.id === top.id;
@@ -87,7 +88,7 @@ export function scoreDay(level: Level, day: DayRun): ScoreCard {
     });
   }
   for (const c of level.circuits) {
-    const at = day.tripHour.get(c.id);
+    const at = overloadTrip(c.id);
     if (at === undefined) continue;
     const p = day.peaks.get(c.id)!;
     mistakes.push({
@@ -97,7 +98,7 @@ export function scoreDay(level: Level, day: DayRun): ScoreCard {
         `Pick a breaker bigger than the room's highest current, on a cable that can carry it.`,
     });
   }
-  if (day.tripHour.size === 0) good.push({ kind: 'good', title: 'Power stayed on all day', text: 'No breaker tripped. Every room had power for the whole day.' });
+  if ([...day.tripHour.keys()].every(id => day.faultTripped.has(id)) && day.faults.every(f => f.selective)) good.push({ kind: 'good', title: 'Power stayed on all day', text: 'No breaker tripped. Every room had power for the whole day.' });
 
   // ---- Safety: each breaker must protect its cable
   let unsafe = 0;
@@ -185,6 +186,44 @@ export function scoreDay(level: Level, day: DayRun): ScoreCard {
     }
     points.balance = Math.max(0, max('balance') * (1 - IMBALANCE_SHARE * unbalanced));
     if (unbalanced === 0) good.push({ kind: 'good', title: 'Phases balanced', text: 'The three phases shared the load evenly on every board.' });
+  }
+
+  // ---- Short circuits: the nearest breaker should open at once, and nothing upstream
+  if (max('protection') > 0 && day.faults.length) {
+    const share = max('protection') / day.faults.length;
+    let lost = 0;
+    const nameOf = (id: string) => level.circuits.find(c => c.id === id)?.room ?? level.boards.find(b => b.id === id)?.name ?? id;
+    for (const f of day.faults) {
+      const room = level.circuits.find(c => c.id === f.circuit)!;
+      const own = f.path[0];
+      if (!f.instant) {
+        lost += share;
+        mistakes.push({
+          kind: 'mistake', target: room.id, title: `Short circuit not cleared at once: ${room.room}`,
+          text: `At ${hhmm(f.hour)} the short in ${room.room} drew only ${fmt(f.amps, 0)} A. Its ${room.breakerA} A breaker needs ` +
+            `${fmt(own.instantA, 0)} A to trip at once, so the fault lasted ${fmt(f.seconds)} s. The cable heats fast and metal parts ` +
+            'can give a shock. Use a smaller breaker, or a shorter or thicker cable so more current flows in a fault.',
+        });
+      } else if (!f.selective) {
+        lost += share / 2;
+        const upstream = f.tripped.filter(id => id !== room.id);
+        const ownMissed = !f.tripped.includes(room.id);
+        warnings.push({
+          kind: 'warning', target: room.id, title: `Too many breakers tripped: ${room.room}`,
+          text: `At ${hhmm(f.hour)} the short in ${room.room} drew ${fmt(f.amps, 0)} A, and ${upstream.map(nameOf).join(', ')} opened too, ` +
+            'so every room behind it lost power. ' +
+            (ownMissed ? `${room.room}'s own ${room.breakerA} A breaker needs ${fmt(own.instantA, 0)} A to trip at once. ` : '') +
+            `A board breaker trips at once from 10 × its rating. Pick board breakers above ${fmt(f.amps / 10, 0)} A on this path, ` +
+            'on cables that can carry them, so only the nearest breaker opens.',
+        });
+      } else {
+        good.push({
+          kind: 'good', title: `Only the faulty room went off: ${room.room}`,
+          text: `The short drew ${fmt(f.amps, 0)} A. ${room.room}'s breaker opened at once and every other room kept its power.`,
+        });
+      }
+    }
+    points.protection = Math.max(0, max('protection') - lost);
   }
 
   // ---- Cost against the level budget

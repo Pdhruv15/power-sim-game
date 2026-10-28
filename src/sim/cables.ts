@@ -22,3 +22,8 @@ export function cableDropV(amps: number, mm2: number, lengthM: number, phases: 1
   if (mm2 <= 0 || lengthM <= 0) return 0;
   return ((phases === 1 ? 2 : 1) * amps * COPPER_RHO * lengthM) / mm2;
 }
+
+/** Resistance of a phase and neutral pair, out and back, in ohms. Used for short-circuit current. */
+export function loopOhms(mm2: number, lengthM: number): number {
+  return mm2 > 0 && lengthM > 0 ? (2 * COPPER_RHO * lengthM) / mm2 : 0;
+}

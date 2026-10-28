@@ -1,6 +1,6 @@
 import { CABLE_AMPS, CABLE_SIZES, DEFAULT_CABLE } from './cables';
 import { GRID_ID } from './network';
-import { LOAD_TYPES, PHASES, type Board, type Circuit, type Level, type LoadType, type Phase } from './types';
+import { LOAD_TYPES, PHASES, type Board, type Circuit, type FaultEvent, type Level, type LoadType, type Phase } from './types';
 
 /** Thrown when a level file is not valid. The message lists every problem found. */
 export class LevelError extends Error {
@@ -15,6 +15,9 @@ const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !
 const isPositive = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
 const isNonNegative = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0;
 const isCable = (v: unknown): boolean => typeof v === 'number' && v in CABLE_AMPS;
+
+/** Typical supply resistance close to a distribution transformer. */
+const DEFAULT_SOURCE_OHMS = 0.03;
 
 /** Board id used when a villa-format file (Level 1) is converted. */
 export const VILLA_BOARD_ID = 'DB';
@@ -40,6 +43,10 @@ export function parseLevel(raw: unknown): Level {
   const boards = villaFormat ? villaBoard(raw, supply, problems) : parseBoards(raw.boards as unknown[], problems);
   const circuits = parseCircuits(raw.circuits, boards, villaFormat, problems);
 
+  const sourceOhms = supply.sourceOhms ?? DEFAULT_SOURCE_OHMS;
+  if (!isPositive(sourceOhms)) problems.push('supply.sourceOhms: must be a positive number of ohms');
+  const faults = parseFaults(raw.faults, circuits, problems);
+
   const budget = raw.budget;
   if (budget !== undefined && !isPositive(budget)) problems.push('budget: must be a positive number');
   const points = raw.points;
@@ -59,6 +66,8 @@ export function parseLevel(raw: unknown): Level {
     circuits,
     ...(budget !== undefined && { budget: budget as number }),
     ...(points !== undefined && { points: points as Record<string, number> }),
+    sourceOhms: sourceOhms as number,
+    faults,
   };
 }
 
@@ -69,7 +78,7 @@ function villaBoard(raw: Obj, supply: Obj, problems: string[]): Board[] {
   if (!isNonNegative(solarKw)) problems.push('solarKw: must be 0 or more');
   return [{
     id: VILLA_BOARD_ID, name: 'Villa DB', parent: null, breakerA: Number(supply.mainBreakerA), phases: 1, cable: null,
-    solarKw: Number(solarKw),
+    solarKw: Number(solarKw), phase: 'L1',
   }];
 }
 
@@ -98,9 +107,13 @@ function parseBoards(list: unknown[], problems: string[]): Board[] {
     }
     const solarKw = b.solarKw ?? 0;
     if (!isNonNegative(solarKw)) problems.push(`${at}.solarKw: must be 0 or more`);
+    const phase = b.phase ?? 'L1';
+    if (!PHASES.includes(phase as Phase)) problems.push(`${at}.phase: must be one of ${PHASES.join(', ')}`);
+    if (b.floor !== undefined && !(Number.isInteger(b.floor) && (b.floor as number) >= 0)) problems.push(`${at}.floor: must be 0 or a whole number above`);
     boards.push({
       id, name: typeof b.name === 'string' && b.name ? b.name : id, parent: parent as string | null,
-      breakerA: Number(b.breakerA), phases: phases as 1 | 3, cable, solarKw: Number(solarKw),
+      breakerA: Number(b.breakerA), phases: phases as 1 | 3, cable, solarKw: Number(solarKw), phase: phase as Phase,
+      ...(b.floor !== undefined && { floor: b.floor as number }),
     });
   });
 
@@ -153,4 +166,17 @@ function parseCircuits(list: unknown, boards: Board[], villaFormat: boolean, pro
     });
   });
   return circuits;
+}
+
+function parseFaults(list: unknown, circuits: Circuit[], problems: string[]): FaultEvent[] {
+  if (list === undefined) return [];
+  if (!Array.isArray(list)) { problems.push('faults: must be a list'); return []; }
+  const ids = new Set(circuits.map(c => c.id));
+  return list.map((f: unknown, i): FaultEvent => {
+    const at = `faults[${i}]`;
+    const o = isObj(f) ? f : {};
+    if (!(typeof o.hour === 'number' && o.hour >= 0 && o.hour < 24)) problems.push(`${at}.hour: must be from 0 to below 24`);
+    if (typeof o.circuit !== 'string' || !ids.has(o.circuit)) problems.push(`${at}.circuit: must be a circuit id`);
+    return { hour: Number(o.hour), circuit: String(o.circuit), text: typeof o.text === 'string' && o.text ? o.text : 'A cable shorts' };
+  });
 }
