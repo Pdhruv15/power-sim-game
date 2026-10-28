@@ -1,12 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  bandOf, branchCurrents, INSTANT_TRIP, LevelError, NEW_BREAKER, parseVilla, profileAt, pvOutput,
-  Simulator, stepBreaker, sunAt, villaNetwork, type BreakerState, type VillaData,
+  bandOf, branchCurrents, INSTANT_TRIP, LevelError, NEW_BREAKER, parseLevel, profileAt, pvOutput,
+  Simulator, stepBreaker, sunAt, levelNetwork, type BreakerState, type Level,
 } from './index';
 
-const sample = (): VillaData =>
-  parseVilla(JSON.parse(readFileSync(new URL('../../public/data/villa.json', import.meta.url), 'utf8')));
+const sample = (): Level =>
+  parseLevel(JSON.parse(readFileSync(new URL('../../public/data/villa.json', import.meta.url), 'utf8')));
 const circuit = (sim: Simulator, id: string) => sim.result().circuits.find(c => c.id === id)!;
 
 describe('profiles', () => {
@@ -61,22 +61,33 @@ describe('breaker', () => {
 
 describe('network', () => {
   it('sums load currents up to the main board and supply', () => {
-    const net = villaNetwork(sample());
-    const flow = branchCurrents(net, new Map([['C1', 2], ['C2', 3], ['DB', -1]]));
-    expect(flow.get('DB')).toBe(4);
-    expect(flow.get('GRID')).toBe(4);
-    expect(flow.get('C1')).toBe(2);
+    const net = levelNetwork(sample());
+    const flow = branchCurrents(net, new Map<string, [number, number, number]>([['C1', [2, 0, 0]], ['C2', [0, 3, 0]], ['DB', [-1, 0, 0]]]));
+    expect(flow.get('DB')).toEqual([1, 3, 0]);
+    expect(flow.get('GRID')).toEqual([1, 3, 0]);
+    expect(flow.get('C1')).toEqual([2, 0, 0]);
   });
 });
 
-describe('parseVilla', () => {
-  it('accepts the sample file', () => expect(sample().circuits).toHaveLength(8));
+describe('parseLevel', () => {
+  it('accepts the sample file', () => {
+    const v = sample();
+    expect(v.circuits).toHaveLength(8);
+    expect(v.budget).toBe(1100);
+    expect(v.circuits[3].cableMm2).toBe(1.5);
+  });
+  it('defaults the cable to 2.5 mm² and rejects unknown sizes', () => {
+    const base = { project: 'x', supply: { voltage: 230, mainBreakerA: 63 }, circuits: [{ id: 'A', room: 'R', type: 'ac', kw: 1, breakerA: 10 }] };
+    expect(parseLevel(base).circuits[0].cableMm2).toBe(2.5);
+    const bad = { ...base, circuits: [{ ...base.circuits[0], cableMm2: 3 }] };
+    expect(() => parseLevel(bad)).toThrow(/cableMm2/);
+  });
   it('lists every problem', () => {
     const bad = { project: 'x', supply: { voltage: 230 }, circuits: [
       { id: 'A', room: 'R', type: 'heater', kw: 1, breakerA: 10 },
       { id: 'A', room: 'R', type: 'ac', kw: -1, breakerA: 10 },
     ] };
-    try { parseVilla(bad); expect.unreachable(); } catch (e) {
+    try { parseLevel(bad); expect.unreachable(); } catch (e) {
       expect(e).toBeInstanceOf(LevelError);
       const p = (e as LevelError).problems.join('\n');
       expect(p).toMatch(/mainBreakerA/);
@@ -124,7 +135,7 @@ describe('Simulator', () => {
 
   it('cuts every circuit and the solar when the main breaker trips', () => {
     const data = sample();
-    data.supply.mainBreakerA = 20;
+    data.boards[0].breakerA = 20;
     const sim = new Simulator(data, 19);
     sim.advance(1);
     const r = sim.result();
@@ -136,7 +147,7 @@ describe('Simulator', () => {
 
   it('exports to the grid when solar exceeds the load', () => {
     const data = sample();
-    data.solarKw = 20;
+    data.boards[0].solarKw = 20;
     const r = new Simulator(data, 11).result();
     expect(r.gridKw).toBeLessThan(0);
   });

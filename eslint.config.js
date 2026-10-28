@@ -12,13 +12,13 @@ export default tseslint.config(
     rules: reactHooks.configs.recommended.rules,
   },
   {
-    // The simulation is the future LV Design Studio plugin core: no rendering or UI code in it.
-    files: ['src/sim/**/*.ts'],
+    // Simulation and game rules are the future LV Design Studio plugin core: no rendering or UI code in them.
+    files: ['src/sim/**/*.ts', 'src/game/**/*.ts'],
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['three', 'three/*', 'react', 'react-dom', 'react-dom/*', '../render/*', '../ui/*'],
-          message: 'src/sim must stay free of rendering and UI code.',
+          group: ['three', 'three/*', 'react', 'react-dom', 'react-dom/*', '../render/*', '../ui/*', '**/render/**', '**/ui/**'],
+          message: 'src/sim and src/game must stay free of rendering and UI code.',
         }],
       }],
     },

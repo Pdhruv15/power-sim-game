@@ -1,6 +1,6 @@
 {
   "name": "power-sim-game",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Learning game for electrical power distribution: run the power for a villa, then a village and a city.",
   "type": "module",
@@ -19,6 +19,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^22.20.5",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
@@ -26,6 +28,7 @@
     "@vitejs/plugin-react": "^4.7.0",
     "eslint": "^9.39.5",
     "eslint-plugin-react-hooks": "^5.2.0",
+    "jsdom": "^26.1.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.72.1",
     "vite": "^6.4.5",

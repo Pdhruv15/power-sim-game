@@ -3,8 +3,12 @@
 A learning game about electrical power distribution. The player runs the power for a place that grows:
 one villa first, then two villas, a building, a village and a city. Good choices earn points, mistakes cost points.
 
-This first version is **Level 1, one villa**: a 3D villa runs through a day, and each circuit's load,
-the solar output and the grid import change with the time.
+| Level | What you learn |
+|---|---|
+| 1 · One villa | Breaker and cable sizing, daily load profiles, solar |
+| 2 · Two villas | Three-phase supply, phase balance, feeder cables, voltage drop over distance |
+
+A level opens once the one before it has at least one star. Best results are kept in the browser.
 
 ## Run it
 
@@ -24,11 +28,39 @@ Then open http://localhost:5173.
 
 ## How to play (Level 1)
 
-- Drag to rotate, scroll to zoom, right-drag to pan. Click a room (or its row) to see inside.
-- Move the time slider or press **Play** (one hour per second).
-- Room glow and cables show breaker loading: green below 60 %, orange 60–90 %, red above 90 %.
-- Above 100 % a breaker heats up and trips after a while. Big overloads trip fast. **Reset breakers** turns them back on.
-- The level file is `public/data/villa.json`. Edit it and reload to try another villa.
+The villa was wired with a few mistakes. Your job is to find and fix them.
+
+1. **Design.** Pick a breaker and cable for each room, the main breaker and the solar size. Learn mode shows
+   each room's highest current. The rule to follow: **room current ≤ breaker ≤ cable**. Watch the budget.
+2. **Run the day.** The day replays from 00:00 to 24:00. Rooms glow green, orange or red with their loading,
+   and the event list shows trips as they happen.
+3. **Result.** You get up to 1000 points and 3 stars. Each mistake gets a short card that says what went wrong and how to fix it.
+
+| Points | For |
+|---|---|
+| 400 | Power kept on (energy supplied ÷ energy asked for) |
+| 250 | Safe design: −125 for each breaker bigger than its cable |
+| 150 | Healthy loading: −50 for each breaker above 90 % at peak |
+| 100 | Within budget (all lost at 25 % over) |
+| 100 | Solar share of the day's energy (full at 30 %) |
+
+3 stars need 900 points and no mistakes. Before the run you can still explore: drag the time slider, rotate the villa,
+show the roof, or click a room to see inside.
+
+## Level 2
+
+Two villas share a three-phase supply from a feeder pillar. Every room starts on L1, and Villa B is 85 m away on a feeder
+cable that is too small for its breaker. Spread the rooms over L1, L2 and L3 (the design panel shows each board's
+phase currents at its busiest time), size the feeders, and keep every room within 5 % of the supply voltage.
+
+Level 2 scores supply 300, safety 200, healthy loading 100, voltage 150, balanced phases 150 and budget 100.
+
+## Level files
+
+Levels live in `public/data/`. Level 1 uses a short villa format (`supply.mainBreakerA`, `solarKw`, `circuits`).
+Other levels list `boards` (each with `parent`, `breakerA`, `phases` and a feeder `cable` of `mm2` and `lengthM`)
+and `circuits` with `board`, `phase` and `lengthM`. `points` sets which score parts a level uses.
+`parseLevel` checks every file and lists all problems it finds.
 
 ## Layout
 
@@ -39,16 +71,27 @@ src/sim/                 simulation: pure TypeScript, no Three.js, React or DOM
   profiles.ts            24-hour demand profiles per load type
   sun.ts                 sun position and solar output
   breaker.ts             simple breaker: heats when overloaded, trips at once on a short circuit
-  network.ts             supply tree (grid → board → loads), ready for transformers later
+  network.ts             supply tree (grid → boards → loads) with per-phase currents, ready for transformers
   simulate.ts            Simulator: setHour / advance / result
-src/render/              Three.js scene. Reads results only.
+  cables.ts              cable sizes, the current each can carry, and voltage drop
+src/game/                game rules: pure TypeScript, like src/sim
+  catalog.ts             equipment choices and prices
+  runDay.ts              scored day: frames, events, energy, peaks
+  score.ts               points, stars and lesson cards
+  hints.ts               Learn mode: each room's highest current
+src/render/SiteScene.ts  Three.js site: villas, feeder pillar, cables. Reads results only.
 src/ui/                  React HUD and app shell
 ```
 
-`src/sim` is the part that will run inside LV Design Studio as a plugin. ESLint blocks rendering and UI imports in it.
+`src/sim` and `src/game` are the parts that will run inside LV Design Studio as a plugin. ESLint blocks rendering and UI imports in them.
 
 ## Simple model (on purpose)
 
-- Single-phase supply. Current = kW ÷ (voltage × power factor). Power factor 0.9 for AC, 0.95 for lighting and sockets.
+- Room current = kW ÷ (230 V × power factor). Power factor 0.9 for AC, 0.95 for lighting and sockets.
+- Phase currents are added as plain numbers (no phase angles). A board breaker sees its busiest phase.
+- Voltage drop uses copper resistance only: both conductors on single-phase runs, one conductor per phase on three-phase feeders.
+- Phases count as unbalanced when the quietest phase is more than 25 % below the busiest at the board's peak.
 - Sun rises at 06:00, sets at 18:00 and peaks at 55°. Solar output = kWp × 0.85 × sun height.
 - Solar connects at the DB and stops when the main breaker trips.
+- Cable ratings are rounded game values for copper cable in a wall: 1.5 mm² 16 A, 2.5 mm² 24 A, 4 mm² 32 A, 6 mm² 40 A, 10 mm² 55 A.
+- Prices are game credits, not real money.

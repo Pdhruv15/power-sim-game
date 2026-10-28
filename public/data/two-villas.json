@@ -1,0 +1,29 @@
+{
+  "id": "level-2-two-villas",
+  "title": "Two villas",
+  "project": "Two villas on one plot",
+  "intro": "Two villas share a three-phase supply from a feeder pillar at the gate. The installer put every room on phase L1, and Villa B is far from the pillar. Spread the rooms over L1, L2 and L3, size the feeder cables for their length, and keep the voltage at every room within 5 %.",
+  "orientation": 0,
+  "supply": { "voltage": 230 },
+  "budget": 2600,
+  "points": { "supply": 300, "safety": 200, "loading": 100, "voltage": 150, "balance": 150, "cost": 100 },
+  "boards": [
+    { "id": "FP", "name": "Feeder pillar", "parent": null, "breakerA": 100, "phases": 3 },
+    { "id": "VA", "name": "Villa A", "parent": "FP", "breakerA": 63, "phases": 3, "cable": { "mm2": 16, "lengthM": 30 } },
+    { "id": "VB", "name": "Villa B", "parent": "FP", "breakerA": 63, "phases": 3, "cable": { "mm2": 10, "lengthM": 85 } }
+  ],
+  "circuits": [
+    { "id": "A1", "board": "VA", "room": "Living",         "type": "ac",       "kw": 4.0, "breakerA": 25, "cableMm2": 4,   "lengthM": 18, "phase": "L1" },
+    { "id": "A2", "board": "VA", "room": "Master Bedroom", "type": "ac",       "kw": 3.0, "breakerA": 20, "cableMm2": 2.5, "lengthM": 22, "phase": "L1" },
+    { "id": "A3", "board": "VA", "room": "Bedroom 2",      "type": "ac",       "kw": 2.4, "breakerA": 16, "cableMm2": 2.5, "lengthM": 25, "phase": "L1" },
+    { "id": "A4", "board": "VA", "room": "Kitchen",        "type": "sockets",  "kw": 3.5, "breakerA": 20, "cableMm2": 2.5, "lengthM": 12, "phase": "L1" },
+    { "id": "A5", "board": "VA", "room": "Lighting",       "type": "lighting", "kw": 1.2, "breakerA": 10, "cableMm2": 1.5, "lengthM": 30, "phase": "L1" },
+    { "id": "A6", "board": "VA", "room": "Laundry",        "type": "sockets",  "kw": 2.0, "breakerA": 16, "cableMm2": 2.5, "lengthM": 15, "phase": "L1" },
+    { "id": "B1", "board": "VB", "room": "Living",         "type": "ac",       "kw": 4.0, "breakerA": 25, "cableMm2": 4,   "lengthM": 18, "phase": "L1" },
+    { "id": "B2", "board": "VB", "room": "Master Bedroom", "type": "ac",       "kw": 3.0, "breakerA": 20, "cableMm2": 2.5, "lengthM": 22, "phase": "L1" },
+    { "id": "B3", "board": "VB", "room": "Bedroom 2",      "type": "ac",       "kw": 2.4, "breakerA": 16, "cableMm2": 2.5, "lengthM": 25, "phase": "L1" },
+    { "id": "B4", "board": "VB", "room": "Kitchen",        "type": "sockets",  "kw": 3.5, "breakerA": 20, "cableMm2": 2.5, "lengthM": 12, "phase": "L1" },
+    { "id": "B5", "board": "VB", "room": "Lighting",       "type": "lighting", "kw": 1.2, "breakerA": 10, "cableMm2": 1.5, "lengthM": 30, "phase": "L1" },
+    { "id": "B6", "board": "VB", "room": "Laundry",        "type": "sockets",  "kw": 2.0, "breakerA": 16, "cableMm2": 2.5, "lengthM": 15, "phase": "L1" }
+  ]
+}
