@@ -1,8 +1,9 @@
 import { NEW_BREAKER, stepBreaker, type BreakerState } from './breaker';
-import { branchCurrents, MAIN_BOARD_ID, villaNetwork, type Network } from './network';
+import { cableDropV } from './cables';
+import { branchCurrents, levelNetwork, maxPhase, onPhase, type Network, type PhaseAmps } from './network';
 import { POWER_FACTOR, profileAt, wrapHour } from './profiles';
 import { pvOutput, sunAt, type Sun } from './sun';
-import type { LoadType, VillaData } from './types';
+import { topBoard, type LoadType, type Level, type Phase } from './types';
 
 /** Loading bands as a fraction of breaker rating: green < 60 %, orange 60–90 %, red > 90 %. */
 export const BANDS = { warn: 0.6, high: 0.9 } as const;
@@ -14,8 +15,10 @@ const MAX_STEP_HOURS = 0.05;
 
 export interface CircuitResult {
   id: string;
+  board: string;
   room: string;
   type: LoadType;
+  phase: Phase;
   breakerA: number;
   /** What the room asks for at this time, even if its breaker is off. */
   demandKw: number;
@@ -33,22 +36,50 @@ export interface CircuitResult {
   tripped: boolean;
   /** Off because this breaker or one upstream is open. */
   dead: boolean;
+  /** Voltage lost from the supply to this room, as % of the phase voltage. */
+  vdPct: number;
+}
+
+export interface BoardResult {
+  id: string;
+  name: string;
+  parent: string | null;
+  phases: 1 | 3;
+  /** Current on L1, L2, L3. Negative when solar exports through this board. */
+  phaseAmps: PhaseAmps;
+  /** Highest phase current: what the board's breaker sees. */
+  amps: number;
+  ratingA: number;
+  loading: number;
+  band: Band;
+  overloaded: boolean;
+  heat: number;
+  tripped: boolean;
+  dead: boolean;
+  /** Voltage lost from the supply to this board, as % of the phase voltage. */
+  vdPct: number;
+  /** (highest − lowest phase) ÷ highest, for three-phase boards. 0 = balanced. */
+  imbalance: number;
+  solarKw: number;
 }
 
 export interface SimResult {
   hour: number;
   sun: Sun;
   circuits: CircuitResult[];
+  boards: BoardResult[];
   loadKw: number;
+  /** Sum of all room currents. */
   loadA: number;
   solarKw: number;
   /** Load − solar. Negative = export to the grid. */
   gridKw: number;
-  main: { amps: number; ratingA: number; loading: number; band: Band; heat: number; tripped: boolean };
+  /** The top board, fed from the grid. Its breaker is the main breaker. */
+  main: BoardResult;
 }
 
 /**
- * Runs the villa through the day. Pure logic with no rendering, so the same class can run
+ * Runs a level through the day. Pure logic with no rendering, so the same class can run
  * in the browser game, in tests, or inside LV Design Studio.
  *
  *   setHour(h)   jump to a time (no time passes, breakers keep their heat)
@@ -60,8 +91,8 @@ export class Simulator {
   private parentOf: Map<string, string | null>;
   hour: number;
 
-  constructor(readonly data: VillaData, hour = 0) {
-    this.network = villaNetwork(data);
+  constructor(readonly level: Level, hour = 0) {
+    this.network = levelNetwork(level);
     this.parentOf = new Map(this.network.nodes.map(n => [n.id, n.parent]));
     this.hour = wrapHour(hour);
   }
@@ -77,7 +108,7 @@ export class Simulator {
       const flow = this.flow(this.hour);
       for (const node of this.network.nodes) {
         if (!node.breakerA) continue;
-        const loading = Math.abs(flow.branch.get(node.id) ?? 0) / node.breakerA;
+        const loading = maxPhase(flow.branch.get(node.id)!) / node.breakerA;
         this.breakers.set(node.id, stepBreaker(this.breaker(node.id), loading, dt));
       }
       this.hour = wrapHour(this.hour + dt);
@@ -90,28 +121,60 @@ export class Simulator {
   }
 
   result(): SimResult {
-    const { sun, solarKw, demand, branch } = this.flow(this.hour);
-    const circuits = this.data.circuits.map((c): CircuitResult => {
+    const { sun, solar, demand, branch } = this.flow(this.hour);
+    const V = this.level.voltage;
+
+    // Boards, parents before children so voltage drop can build up from the supply
+    const boards: BoardResult[] = [];
+    const byId = new Map<string, BoardResult>();
+    for (const b of this.boardsTopDown()) {
+      const phaseAmps = branch.get(b.id)!;
+      const amps = maxPhase(phaseAmps);
+      const loading = amps / b.breakerA;
+      const state = this.breaker(b.id);
+      const dead = !this.isLive(b.id);
+      const feederDrop = b.cable ? cableDropV(amps, b.cable.mm2, b.cable.lengthM, b.phases) : 0;
+      const sizes = phaseAmps.map(Math.abs);
+      const imbalance = b.phases === 3 && amps > 0 ? (Math.max(...sizes) - Math.min(...sizes)) / Math.max(...sizes) : 0;
+      const r: BoardResult = {
+        id: b.id, name: b.name, parent: b.parent, phases: b.phases, phaseAmps, amps, ratingA: b.breakerA,
+        loading, band: bandOf(loading), overloaded: !dead && loading > 1, heat: state.heat, tripped: state.tripped, dead,
+        vdPct: (b.parent ? byId.get(b.parent)!.vdPct : 0) + (feederDrop / V) * 100,
+        imbalance, solarKw: solar.get(b.id) ?? 0,
+      };
+      boards.push(r);
+      byId.set(b.id, r);
+    }
+
+    const circuits = this.level.circuits.map((c): CircuitResult => {
       const d = demand.get(c.id)!;
-      const b = this.breaker(c.id);
+      const state = this.breaker(c.id);
       const dead = !this.isLive(c.id);
       const loading = d.amps / c.breakerA;
+      const amps = dead ? 0 : d.amps;
       return {
-        id: c.id, room: c.room, type: c.type, breakerA: c.breakerA,
-        demandKw: d.kw, demandA: d.amps, kw: dead ? 0 : d.kw, amps: dead ? 0 : d.amps,
-        loading, band: bandOf(loading), overloaded: !dead && loading > 1,
-        heat: b.heat, tripped: b.tripped, dead,
+        id: c.id, board: c.board, room: c.room, type: c.type, phase: c.phase, breakerA: c.breakerA,
+        demandKw: d.kw, demandA: d.amps, kw: dead ? 0 : d.kw, amps,
+        loading, band: bandOf(loading), overloaded: !dead && loading > 1, heat: state.heat, tripped: state.tripped, dead,
+        vdPct: byId.get(c.board)!.vdPct + (cableDropV(amps, c.cableMm2, c.lengthM, 1) / V) * 100,
       };
     });
+
     const loadKw = circuits.reduce((s, c) => s + c.kw, 0);
-    const loadA = circuits.reduce((s, c) => s + c.amps, 0);
-    const mainA = Math.abs(branch.get(MAIN_BOARD_ID) ?? 0);
-    const ratingA = this.data.supply.mainBreakerA;
-    const mb = this.breaker(MAIN_BOARD_ID);
+    const solarKw = [...solar.values()].reduce((s, k) => s + k, 0);
     return {
-      hour: this.hour, sun, circuits, loadKw, loadA, solarKw, gridKw: loadKw - solarKw,
-      main: { amps: mainA, ratingA, loading: mainA / ratingA, band: bandOf(mainA / ratingA), heat: mb.heat, tripped: mb.tripped },
+      hour: this.hour, sun, circuits, boards, loadKw, loadA: circuits.reduce((s, c) => s + c.amps, 0),
+      solarKw, gridKw: loadKw - solarKw, main: byId.get(topBoard(this.level).id)!,
     };
+  }
+
+  private boardsTopDown() {
+    const out: Level['boards'] = [];
+    const visit = (parent: string | null) => {
+      for (const b of this.level.boards) if (b.parent === parent) { out.push(b); visit(b.id); }
+    };
+    visit(null);
+    return out;
   }
 
   private breaker(id: string): BreakerState {
@@ -126,21 +189,28 @@ export class Simulator {
     return true;
   }
 
-  /** Demand per circuit and current through each node at this hour. */
+  /** Demand per circuit, solar per board, and current through each node at this hour. */
   private flow(hour: number) {
-    const V = this.network.voltage;
+    const V = this.level.voltage;
     const sun = sunAt(hour);
-    // Solar only runs while the main DB is live (inverters switch off when the supply is lost).
-    const solarKw = this.isLive(MAIN_BOARD_ID) ? pvOutput(this.data.solarKw, sun) : 0;
     const demand = new Map<string, { kw: number; amps: number }>();
-    const injected = new Map<string, number>();
-    for (const c of this.data.circuits) {
+    const injected = new Map<string, PhaseAmps>();
+    for (const c of this.level.circuits) {
       const kw = c.kw * profileAt(c.type, hour);
       const amps = (kw * 1000) / (V * POWER_FACTOR[c.type]);
       demand.set(c.id, { kw, amps });
-      if (this.isLive(c.id)) injected.set(c.id, amps);
+      if (this.isLive(c.id)) injected.set(c.id, onPhase(this.level, c.id, amps));
     }
-    injected.set(MAIN_BOARD_ID, -(solarKw * 1000) / V); // PV connects at the DB, power factor 1
-    return { sun, solarKw, demand, branch: branchCurrents(this.network, injected) };
+    // Solar runs only while its board is live (inverters switch off when the supply is lost).
+    // It feeds L1 on a single-phase board and all three phases equally on a three-phase board. Power factor 1.
+    const solar = new Map<string, number>();
+    for (const b of this.level.boards) {
+      if (b.solarKw <= 0 || !this.isLive(b.id)) continue;
+      const kw = pvOutput(b.solarKw, sun);
+      solar.set(b.id, kw);
+      const a = -(kw * 1000) / V;
+      injected.set(b.id, b.phases === 3 ? [a / 3, a / 3, a / 3] : [a, 0, 0]);
+    }
+    return { sun, solar, demand, branch: branchCurrents(this.network, injected) };
   }
 }
