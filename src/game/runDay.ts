@@ -1,20 +1,32 @@
-import { BANDS, Simulator, type SimResult, type VillaData } from '../sim';
+import { BANDS, Simulator, topBoard, type Level, type PhaseAmps, type SimResult } from '../sim';
 
 /** Fixed step for a scored day: 3 minutes, 480 frames. The same frames drive the replay. */
 export const DAY_STEP_HOURS = 0.05;
 
-export type DayEventKind = 'trip' | 'main-trip' | 'high';
+export type DayEventKind = 'trip' | 'board-trip' | 'main-trip' | 'high';
 
 export interface DayEvent {
   hour: number;
   kind: DayEventKind;
-  circuitId?: string;
+  /** Circuit or board id. */
+  target?: string;
   text: string;
 }
 
 export interface Peak {
   loading: number;
   amps: number;
+  hour: number;
+}
+
+export interface BoardPeak extends Peak {
+  /** Phase currents and imbalance at the moment of the peak. */
+  phaseAmps: PhaseAmps;
+  imbalance: number;
+}
+
+export interface WorstDrop {
+  vdPct: number;
   hour: number;
 }
 
@@ -26,24 +38,31 @@ export interface DayRun {
   energy: { demand: number; supplied: number; solar: number; solarUsed: number; grid: number; exported: number };
   /** Highest demand per circuit over the day (even while its breaker was off). */
   peaks: Map<string, Peak>;
-  /** Highest current through the main breaker while it was on. */
-  mainPeak: Peak;
+  /** Highest current per board while it was on. */
+  boardPeaks: Map<string, BoardPeak>;
+  /** Worst voltage drop per room while it had power. */
+  drops: Map<string, WorstDrop>;
+  /** Hour each circuit or board breaker tripped. */
   tripHour: Map<string, number>;
+  /** Hour the main breaker (top board) tripped, or null. */
   mainTripHour: number | null;
+  /** Peak of the top board. */
+  mainPeak: BoardPeak;
 }
 
 /** Run a whole day from midnight with fresh breakers and record what happened. */
-export function runDay(data: VillaData): DayRun {
-  const sim = new Simulator(data, 0);
+export function runDay(level: Level): DayRun {
+  const sim = new Simulator(level, 0);
+  const topId = topBoard(level).id;
   const steps = Math.round(24 / DAY_STEP_HOURS);
   const frames: SimResult[] = [];
   const events: DayEvent[] = [];
   const energy = { demand: 0, supplied: 0, solar: 0, solarUsed: 0, grid: 0, exported: 0 };
   const peaks = new Map<string, Peak>();
-  const mainPeak: Peak = { loading: 0, amps: 0, hour: 0 };
+  const boardPeaks = new Map<string, BoardPeak>(level.boards.map(b => [b.id, { loading: 0, amps: 0, hour: 0, phaseAmps: [0, 0, 0], imbalance: 0 }]));
+  const drops = new Map<string, WorstDrop>();
   const tripHour = new Map<string, number>();
   const warned = new Set<string>();
-  let mainTripHour: number | null = null;
 
   for (let i = 0; i <= steps; i++) {
     const hour = i * DAY_STEP_HOURS;
@@ -55,18 +74,23 @@ export function runDay(data: VillaData): DayRun {
     for (const c of r.circuits) {
       energy.demand += c.demandKw * dt;
       energy.supplied += c.kw * dt;
-      const p = peaks.get(c.id);
-      if (!p || c.demandA / c.breakerA > p.loading) peaks.set(c.id, { loading: c.demandA / c.breakerA, amps: c.demandA, hour });
+      if (c.loading > (peaks.get(c.id)?.loading ?? -1)) peaks.set(c.id, { loading: c.loading, amps: c.demandA, hour });
+      if (!c.dead && c.vdPct > (drops.get(c.id)?.vdPct ?? -1)) drops.set(c.id, { vdPct: c.vdPct, hour });
       if (!c.dead && c.loading > BANDS.high && !warned.has(c.id)) {
         warned.add(c.id);
-        events.push({ hour, kind: 'high', circuitId: c.id, text: `${c.room} went above 90 % of its breaker` });
+        events.push({ hour, kind: 'high', target: c.id, text: `${c.room} went above 90 % of its breaker` });
+      }
+    }
+    for (const b of r.boards) {
+      const p = boardPeaks.get(b.id)!;
+      if (!b.tripped && b.loading > p.loading) {
+        Object.assign(p, { loading: b.loading, amps: b.amps, hour, phaseAmps: [...b.phaseAmps], imbalance: b.imbalance });
       }
     }
     energy.solar += r.solarKw * dt;
     energy.solarUsed += Math.min(r.solarKw, r.loadKw) * dt;
     energy.grid += Math.max(0, r.gridKw) * dt;
     energy.exported += Math.max(0, -r.gridKw) * dt;
-    if (!r.main.tripped && r.main.loading > mainPeak.loading) Object.assign(mainPeak, { loading: r.main.loading, amps: r.main.amps, hour });
 
     sim.advance(dt);
 
@@ -75,14 +99,20 @@ export function runDay(data: VillaData): DayRun {
     for (const c of after.circuits) {
       if (c.tripped && !tripHour.has(c.id)) {
         tripHour.set(c.id, hour + dt);
-        events.push({ hour: hour + dt, kind: 'trip', circuitId: c.id, text: `${c.room} breaker tripped` });
+        events.push({ hour: hour + dt, kind: 'trip', target: c.id, text: `${c.room} breaker tripped` });
       }
     }
-    if (after.main.tripped && mainTripHour === null) {
-      mainTripHour = hour + dt;
-      events.push({ hour: hour + dt, kind: 'main-trip', text: 'Main breaker tripped: the whole villa lost power' });
+    for (const b of after.boards) {
+      if (!b.tripped || tripHour.has(b.id)) continue;
+      tripHour.set(b.id, hour + dt);
+      events.push(b.id === topId
+        ? { hour: hour + dt, kind: 'main-trip', target: b.id, text: 'Main breaker tripped: everything lost power' }
+        : { hour: hour + dt, kind: 'board-trip', target: b.id, text: `${b.name} breaker tripped: the whole board lost power` });
     }
   }
 
-  return { frames, events, energy, peaks, mainPeak, tripHour, mainTripHour };
+  return {
+    frames, events, energy, peaks, boardPeaks, drops, tripHour,
+    mainTripHour: tripHour.get(topId) ?? null, mainPeak: boardPeaks.get(topId)!,
+  };
 }

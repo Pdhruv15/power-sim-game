@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { VillaScene } from '../render/VillaScene';
-import type { SimResult, VillaData } from '../sim';
+import { SiteScene } from '../render/SiteScene';
+import type { Level, SimResult } from '../sim';
 
 interface Props {
-  data: VillaData;
+  level: Level;
   result: SimResult;
   roofOn: boolean;
   faded: ReadonlySet<string>;
@@ -11,9 +11,9 @@ interface Props {
 }
 
 /** Hosts the Three.js scene and passes it each new result. */
-export function Stage({ data, result, roofOn, faded, onRoomClick }: Props) {
+export function Stage({ level, result, roofOn, faded, onRoomClick }: Props) {
   const host = useRef<HTMLDivElement>(null);
-  const scene = useRef<VillaScene | null>(null);
+  const scene = useRef<SiteScene | null>(null);
   const latest = useRef({ result, roofOn, faded, onRoomClick });
   const [failed, setFailed] = useState(false);
 
@@ -21,9 +21,9 @@ export function Stage({ data, result, roofOn, faded, onRoomClick }: Props) {
 
   // Create the scene once per level and bring it up to date with the current props
   useEffect(() => {
-    let s: VillaScene;
+    let s: SiteScene;
     try {
-      s = new VillaScene(host.current!, data);
+      s = new SiteScene(host.current!, level);
     } catch (e) {
       console.error('3D view could not start', e);
       setFailed(true);
@@ -36,7 +36,7 @@ export function Stage({ data, result, roofOn, faded, onRoomClick }: Props) {
     s.setFaded(p.faded);
     scene.current = s;
     return () => { s.dispose(); scene.current = null; };
-  }, [data]);
+  }, [level]);
 
   useEffect(() => { scene.current?.update(result); }, [result]);
   useEffect(() => { scene.current?.setRoofVisible(roofOn); }, [roofOn]);

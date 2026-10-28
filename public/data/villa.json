@@ -1,4 +1,6 @@
 {
+  "id": "level-1-villa",
+  "title": "One villa",
   "project": "Villa 2BR — sample",
   "intro": "The electrician who wired this villa made a few mistakes. Run a day to see what goes wrong, then fix the breakers and cables. Stay within the budget.",
   "orientation": 20,
@@ -6,13 +8,13 @@
   "solarKw": 5,
   "budget": 1100,
   "circuits": [
-    { "id": "C1", "room": "Majlis",         "type": "lighting", "kw": 0.9, "breakerA": 6,  "cableMm2": 1.5 },
-    { "id": "C2", "room": "Living",         "type": "ac",       "kw": 3.0, "breakerA": 20, "cableMm2": 2.5 },
-    { "id": "C3", "room": "Dining",         "type": "lighting", "kw": 0.6, "breakerA": 6,  "cableMm2": 1.5 },
-    { "id": "C4", "room": "Kitchen",        "type": "sockets",  "kw": 3.0, "breakerA": 20, "cableMm2": 1.5 },
-    { "id": "C5", "room": "Master Bedroom", "type": "ac",       "kw": 3.0, "breakerA": 16, "cableMm2": 2.5 },
-    { "id": "C6", "room": "Bedroom 2",      "type": "ac",       "kw": 2.4, "breakerA": 10, "cableMm2": 1.5 },
-    { "id": "C7", "room": "Bathroom",       "type": "sockets",  "kw": 1.8, "breakerA": 10, "cableMm2": 1.5 },
-    { "id": "C8", "room": "Laundry",        "type": "sockets",  "kw": 2.0, "breakerA": 16, "cableMm2": 2.5 }
+    { "id": "C1", "room": "Majlis", "type": "lighting", "kw": 0.9, "breakerA": 6, "cableMm2": 1.5 },
+    { "id": "C2", "room": "Living", "type": "ac", "kw": 3.0, "breakerA": 20, "cableMm2": 2.5 },
+    { "id": "C3", "room": "Dining", "type": "lighting", "kw": 0.6, "breakerA": 6, "cableMm2": 1.5 },
+    { "id": "C4", "room": "Kitchen", "type": "sockets", "kw": 3.0, "breakerA": 20, "cableMm2": 1.5 },
+    { "id": "C5", "room": "Master Bedroom", "type": "ac", "kw": 3.0, "breakerA": 16, "cableMm2": 2.5 },
+    { "id": "C6", "room": "Bedroom 2", "type": "ac", "kw": 2.4, "breakerA": 10, "cableMm2": 1.5 },
+    { "id": "C7", "room": "Bathroom", "type": "sockets", "kw": 1.8, "breakerA": 10, "cableMm2": 1.5 },
+    { "id": "C8", "room": "Laundry", "type": "sockets", "kw": 2.0, "breakerA": 16, "cableMm2": 2.5 }
   ]
 }
