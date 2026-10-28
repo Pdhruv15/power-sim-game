@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { PHASES, type Board, type Circuit, type Level, type SimResult } from '../sim';
-import { skyColor, STATUS, statusColor } from './colors';
-import { roomLabelVisible, type LabelMode, type RoomState } from './labelRules';
-import { Landscape } from './Landscape';
+import { STATUS, statusColor } from './colors';
+import { boardLabelVisible, roomLabelVisible, type LabelMode, type RoomState } from './labelRules';
+import { CABLE_DEPTH, Landscape } from './Landscape';
+import { Sky } from './Sky';
 import { layoutLandscape, PAVEMENT_WIDTH, ROAD_WIDTH, type Rect } from './landscapeLayout';
 
 // Plan dimensions in metres. Each villa has two rows of rooms either side of a corridor, one room per circuit.
@@ -13,6 +14,7 @@ const VILLA_GAP = 7;             // between villas
 const FLAT_GAP = 0.3;            // between flats in a building
 const FLOOR_H = BASE + WALL_H + 0.25; // storey height
 const RISER_SETBACK = 1.8;       // riser and boards beside the building's west end
+const SKY_RADIUS = 260;          // inside the camera's far plane
 const PILLAR_SETBACK = 6;        // feeder pillar distance in front of the villas
 const PANEL_KW = 0.55;           // one PV panel
 const PANEL_TILT = 20;           // degrees
@@ -39,7 +41,8 @@ interface BoardParts {
   label: HTMLDivElement;
   labelObj: CSS2DObject;
   floor: number;
-  alarm: boolean;
+  isTop: boolean;
+  state: RoomState;
 }
 
 /**
@@ -73,8 +76,16 @@ export class SiteScene {
   /** Objects drawn on each floor above the ground, for hiding floors. */
   private floorObjects: { floor: number; obj: THREE.Object3D }[] = [];
   private labelObjs = new Map<HTMLElement, CSS2DObject>();
+  /** Board each room is on. */
+  private roomBoard = new Map<string, string>();
   private hoverQueued: PointerEvent | null = null;
   private landscape: Landscape | null = null;
+  private sky: Sky | null = null;
+  /** Buried supply cable from the street network to the top board, seen in the tile's cut face. */
+  private supply: { mat: THREE.MeshBasicMaterial; labelObj: CSS2DObject } | null = null;
+  /** Furthest the view may pan from the site centre. */
+  private panLimit = 30;
+  private lastT = 0;
   private span = 20;
   private clock = new THREE.Clock();
   private resizeObserver: ResizeObserver;
@@ -89,11 +100,11 @@ export class SiteScene {
     host.append(this.renderer.domElement, this.labels.domElement);
 
     // Isometric-style orthographic camera; OrbitControls gives rotate, zoom and pan.
-    this.camera.position.set(24, 22, 26);
+    this.camera.position.set(22, 30, 24); // about 43° above the ground
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.maxPolarAngle = Math.PI * 0.47; // stay above ground
-    this.controls.minZoom = 0.6;
+    this.controls.minZoom = 0.45; // far enough out to see the whole tile
     this.controls.maxZoom = 4;
 
     this.buildSite(level);
@@ -123,7 +134,9 @@ export class SiteScene {
     const day = THREE.MathUtils.clamp(height / 0.35, 0, 1);
     this.sunLight.intensity = 2.6 * day;
     this.hemi.intensity = 0.15 + 0.85 * day;
-    this.scene.background = skyColor(height, (this.scene.background as THREE.Color) ?? new THREE.Color());
+    this.sky?.setSunHeight(height);
+    this.scene.background = this.sky?.haze ?? null;
+    this.supply?.mat.color.copy(statusColor(r.main.band, r.main.dead));
     this.landscape?.setDaylight(day);
 
     for (const c of r.circuits) {
@@ -149,7 +162,7 @@ export class SiteScene {
       const amps = b.phases === 3
         ? PHASES.map((p, i) => `${p} ${Math.abs(b.phaseAmps[i]).toFixed(0)}`).join(' · ') + ' A'
         : `${b.amps.toFixed(1)} / ${b.ratingA} A`;
-      bp.alarm = b.tripped || b.overloaded;
+      bp.state = { band: b.band, overloaded: b.overloaded, tripped: b.tripped, dead: b.dead };
       bp.label.className = `scene-label tag st-${b.dead ? 'off' : b.band}${b.tripped || b.overloaded ? ' alarm' : ''}`;
       bp.label.lastChild!.textContent = b.tripped ? 'TRIPPED' : b.dead ? 'no supply' : amps;
     }
@@ -185,9 +198,12 @@ export class SiteScene {
     for (const [id, rm] of this.rooms) {
       rm.labelObj.visible = rm.floor <= this.floorLimit && roomLabelVisible(this.labelMode, rm.state, this.faded.has(id), this.hovered === id);
     }
-    for (const bp of this.boards.values()) {
-      bp.labelObj.visible = bp.floor <= this.floorLimit && (this.labelMode !== 'off' || bp.alarm);
+    // Boards that feed the room under the pointer or a clicked room
+    const related = new Set([this.hovered, ...this.faded].filter((id): id is string => !!id).map(id => this.roomBoard.get(id)));
+    for (const [id, bp] of this.boards) {
+      bp.labelObj.visible = bp.floor <= this.floorLimit && boardLabelVisible(this.labelMode, bp.state, bp.isTop, related.has(id));
     }
+    if (this.supply) this.supply.labelObj.visible = this.labelMode !== 'off';
   }
 
   dispose(): void {
@@ -214,16 +230,16 @@ export class SiteScene {
 
   private buildEnvironment(): void {
     const fill = new THREE.AmbientLight(0x4a5d80, 0.35); // night-time fill
-    const s = this.span * 0.8;
+    const tile = this.landscape?.tile;
+    const s = tile ? Math.max(tile.maxX - tile.minX, tile.maxZ - tile.minZ) * 0.6 : this.span * 0.8;
     this.sunLight.castShadow = true;
     this.sunLight.shadow.mapSize.set(2048, 2048);
     Object.assign(this.sunLight.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 1, far: this.span * 4 });
     this.scene.add(this.hemi, fill, this.sunLight, this.sunLight.target, this.sunDisc);
 
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), new THREE.MeshStandardMaterial({ color: 0x7a9a58, roughness: 1 })); // grass
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    this.scene.add(ground);
+    // Sky all round the floating tile. The tile itself is the ground (see Landscape).
+    this.sky = new Sky(SKY_RADIUS, s * 2);
+    this.scene.add(this.sky.group);
   }
 
   /**
@@ -276,8 +292,8 @@ export class SiteScene {
       if (floorOf(b) > 0) this.floorObjects.push({ floor: floorOf(b), obj: cabinet });
       dbAt.set(b.id, at);
       if (at.y === 0) keepClear.push(around(at.x, at.z, 0.45, 0.25));
-      // On a riser the main board's label sits higher, clear of the floor board beside it
-      const labelY = at.y + (building && b.parent === null ? 3.6 : 2.2);
+      // On a riser the main board stands in front, so its label sits low, clear of the floor boards' labels
+      const labelY = at.y + (building && b.parent === null ? 1.6 : 2.2);
       this.boards.set(b.id, this.boardParts(b, new THREE.Vector3(at.x, labelY, at.z), null));
     });
 
@@ -304,9 +320,15 @@ export class SiteScene {
     const roadZ = maxD / 2 + (pillar ? PILLAR_SETBACK + 0.6 : 3) + PAVEMENT_WIDTH + ROAD_WIDTH / 2;
     this.landscape = new Landscape(layoutLandscape({ units: footprints, keepClear, roadZ, reach: Math.max(14, rowW * 0.5) }));
     this.site.add(this.landscape.group);
+    this.buildSupplyCable(dbAt.get(level.boards.find(b => b.parent === null)!.id)!, this.landscape.tile);
 
     const height = (topFloor + 1) * FLOOR_H;
-    this.span = Math.max(rowW + (building ? RISER_SETBACK * 2 : 0), maxD + (others.length && !building ? PILLAR_SETBACK * 2 : 0), height * 1.4);
+    const siteSpan = Math.max(rowW + (building ? RISER_SETBACK * 2 : 0), maxD + (others.length && !building ? PILLAR_SETBACK * 2 : 0), height * 1.4);
+    const { tile } = this.landscape;
+    const tileSpan = Math.max(tile.maxX - tile.minX, tile.maxZ - tile.minZ);
+    // Start a little wider than the site so the tile's edge and the sky around it are in view
+    this.span = Math.max(siteSpan, tileSpan * 0.65);
+    this.panLimit = tileSpan * 0.45;
     this.controls.target.set(0, height / 2, 0);
     this.addLabel(this.scene, 'N ↑', new THREE.Vector3(0, 0, -maxD / 2 - 4), 'scene-label tag'); // north is world −z
   }
@@ -363,6 +385,7 @@ export class SiteScene {
       const marker = tripMarker(cx, markerY, cz, g);
       const label = this.addLabel(g, c.room, new THREE.Vector3(cx, BASE + WALL_H + 0.7, cz), 'scene-label');
       const floor = board.floor ?? 0;
+      this.roomBoard.set(c.id, board.id);
       label.append(document.createElement('span'));
 
       for (const m of [floorMesh, ...walls]) { m.userData.circuitId = c.id; m.userData.floor = floor; this.pickRooms.push(m); }
@@ -412,7 +435,8 @@ export class SiteScene {
     const markerY = labelAt.y + 1.2;
     return {
       cableMat: null, marker: tripMarker(labelAt.x, markerY, labelAt.z, host), markerY, label,
-      labelObj: this.labelObjs.get(label)!, floor: board.floor ?? 0, alarm: false,
+      labelObj: this.labelObjs.get(label)!, floor: board.floor ?? 0, isTop: board.parent === null,
+      state: { band: 'ok', overloaded: false, tripped: false, dead: false },
     };
   }
 
@@ -431,6 +455,37 @@ export class SiteScene {
 
   // ---------- runtime ----------
 
+  /**
+   * Supply cable from the street network, buried in the topsoil under the street. It runs from the top board
+   * to the tile's front edge, where its end shows in the cut face with a label.
+   */
+  private buildSupplyCable(top: THREE.Vector3, tile: Rect): void {
+    const mat = new THREE.MeshBasicMaterial({ color: STATUS.ok });
+    const y = -CABLE_DEPTH, len = tile.maxZ - top.z + 0.05;
+    const run = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, len, 10), mat);
+    run.rotation.x = Math.PI / 2;
+    run.position.set(top.x, y, top.z + len / 2);
+    const riser = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, CABLE_DEPTH + 0.3, 8), mat);
+    riser.position.set(top.x, y / 2 + 0.15, top.z);
+    // Duct around the cable end, so it reads as a pipe in the cut face
+    const duct = new THREE.Mesh(new THREE.RingGeometry(0.15, 0.24, 16), new THREE.MeshBasicMaterial({ color: 0x2b2b2b, side: THREE.DoubleSide }));
+    duct.position.set(top.x, y, tile.maxZ + 0.06);
+    this.site.add(run, riser, duct);
+    const label = this.addLabel(this.site, 'Supply from the street', new THREE.Vector3(top.x, y - 0.9, tile.maxZ + 0.2), 'scene-label tag');
+    this.supply = { mat, labelObj: this.labelObjs.get(label)! };
+  }
+
+  /** Stop the view from panning off the tile into empty sky. */
+  private keepViewOnTile(): void {
+    const t = this.controls.target;
+    const r = Math.hypot(t.x, t.z);
+    if (r <= this.panLimit) return;
+    const k = (r - this.panLimit) / r;
+    const shift = new THREE.Vector3(-t.x * k, 0, -t.z * k);
+    t.add(shift);
+    this.camera.position.add(shift);
+  }
+
   private resize(): void {
     const w = this.host.clientWidth, h = this.host.clientHeight;
     if (!w || !h) return;
@@ -443,6 +498,9 @@ export class SiteScene {
 
   private frame = (): void => {
     const t = this.clock.getElapsedTime();
+    const dt = t - this.lastT;
+    this.lastT = t;
+    this.keepViewOnTile();
     this.controls.update();
     for (const [id, rm] of this.rooms) {
       const target = this.faded.has(id) ? FADED_OPACITY : 1;
@@ -451,6 +509,7 @@ export class SiteScene {
     }
     if (!this.reduceMotion) {
       this.landscape?.tick(t);
+      this.sky?.tick(dt);
       for (const p of [...this.rooms.values(), ...this.boards.values()]) {
         if (!p.marker.visible) continue;
         p.marker.rotation.y = t * 2;

@@ -186,7 +186,6 @@ function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
             />
             <Kpis result={result} solarKwp={pv} />
             <ViewBar labelMode={labelMode} onLabelMode={setLabelMode} floors={floors} floorLimit={floorLimit} onFloorLimit={setFloorLimit} />
-            <p className="hint">Drag to rotate · scroll to zoom · right-drag to pan · point at a room for details</p>
           </div>
           <TimeControls
             mode={phase.kind === 'design' ? 'explore' : phase.kind === 'run' ? 'run' : 'result'}
@@ -195,6 +194,7 @@ function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
             onRoof={() => setRoofOn(r => !r)}
             onSecondary={phase.kind === 'design' ? resetBreakers : finishRun}
           />
+          <p className="hint-line">Drag to rotate · scroll to zoom · right-drag to pan · point at a room for details</p>
           <CircuitList result={result} selected={faded} onSelect={toggleRoom} />
         </div>
 

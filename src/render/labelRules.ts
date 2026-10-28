@@ -1,8 +1,9 @@
 /**
  * Which room labels to show, so a busy building stays readable.
- *   smart  rooms that need attention, plus the one under the pointer and any the player clicked
+ *   smart  rooms and boards that need attention, the main board, the room under the pointer and its board,
+ *          and any room the player clicked
  *   all    every room
- *   off    none (board labels and trip markers stay)
+ *   off    none, except boards that are overloaded or tripped (trip markers always stay)
  */
 export type LabelMode = 'smart' | 'all' | 'off';
 
@@ -22,4 +23,11 @@ export function roomLabelVisible(mode: LabelMode, room: RoomState, selected: boo
   if (mode === 'all') return true;
   if (mode === 'off') return false;
   return selected || hovered || needsAttention(room);
+}
+
+/** isTop: the board fed from the grid. related: the board feeds the room under the pointer or a clicked room. */
+export function boardLabelVisible(mode: LabelMode, board: RoomState, isTop: boolean, related: boolean): boolean {
+  if (mode === 'all') return true;
+  if (mode === 'off') return board.overloaded || board.tripped;
+  return isTop || related || needsAttention(board);
 }

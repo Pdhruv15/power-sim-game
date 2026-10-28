@@ -46,6 +46,22 @@ describe('layoutLandscape', () => {
     expect(l.lamps.length).toBeGreaterThanOrEqual(3);
   });
 
+  it('keeps everything on the tile, with the street cut at its edges', () => {
+    const { tile, road } = l;
+    expect(road.minX).toBe(tile.minX);
+    expect(road.maxX).toBe(tile.maxX);
+    expect(tile.maxZ).toBeGreaterThan(road.z + ROAD_WIDTH / 2 + PAVEMENT_WIDTH);
+    for (const p of [...l.trees, ...l.bushes, ...l.lamps]) {
+      expect(inside(tile, p.x, p.z)).toBe(true);
+    }
+    const { pond } = l;
+    expect(pond.x + pond.rx).toBeLessThan(tile.maxX);
+    for (const u of input.units) {
+      expect(u.minX).toBeGreaterThan(tile.minX);
+      expect(u.maxX).toBeLessThan(tile.maxX);
+    }
+  });
+
   it('runs a footpath from each villa to the pavement', () => {
     expect(l.paths).toHaveLength(2);
     for (const p of l.paths) {

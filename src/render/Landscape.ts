@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import type { LandscapeLayout, Tree } from './landscapeLayout';
+import { seededRandom, type LandscapeLayout, type Tree } from './landscapeLayout';
 
 // Scenery colours
 const ASPHALT = 0x3b3f44, MARKING = 0xe9e4d6, PAVEMENT = 0xc9c3b6, KERB = 0xa9a397;
@@ -9,6 +9,16 @@ const TRUNK = 0x7a5532, PALM_TRUNK = 0x9b7a52, LEAF = 0x4f8a3c, PINE = 0x3d6e3a,
 const BUSH = [0x5b8f46, 0x4a7d3b, 0xc2508a];
 const WATER = 0x3f86b0, POND_EDGE = 0x8d7a5a, STONE = 0x9a958c, REED = 0x6b8f3a, LILY = 0x4f8f3c;
 const LAMP_OFF = new THREE.Color(0x5a6066), LAMP_ON = new THREE.Color(0xffd58a);
+const GRASS = 0x7a9a58;
+
+/** Ground layers seen in the tile's cut sides, top down: name, thickness in metres, colour. */
+export const SOIL_LAYERS: readonly { name: string; depth: number; color: number }[] = [
+  { name: 'Topsoil', depth: 0.8, color: 0x6b4a2f },
+  { name: 'Sand', depth: 1.8, color: 0xc29a62 },
+  { name: 'Rock', depth: 1.6, color: 0x7d7a74 },
+];
+/** Depth of the buried supply cable, in the topsoil. */
+export const CABLE_DEPTH = 0.5;
 
 const RIPPLES = 3;
 const RIPPLE_SECONDS = 4;
@@ -24,7 +34,12 @@ export class Landscape {
   private ripples: THREE.Mesh[] = [];
   private pondSize: number;
 
+  get tile() {
+    return this.layout.tile;
+  }
+
   constructor(private layout: LandscapeLayout) {
+    this.buildTile();
     this.buildStreet();
     this.buildLawnsAndPaths();
     this.buildPond();
@@ -52,6 +67,31 @@ export class Landscape {
   }
 
   // ---------- build ----------
+
+  /** The block of land: grass on top, soil layers in the cut sides, rock hanging underneath. */
+  private buildTile(): void {
+    const { tile } = this.layout;
+    const w = tile.maxX - tile.minX, d = tile.maxZ - tile.minZ;
+    const cx = (tile.minX + tile.maxX) / 2, cz = (tile.minZ + tile.maxZ) / 2;
+    flat(w, 0.1, d, GRASS, cx, -0.05, cz, this.group);
+    let top = -0.1;
+    for (const layer of SOIL_LAYERS) {
+      const m = flat(w, layer.depth, d, layer.color, cx, top - layer.depth / 2, cz, this.group);
+      m.receiveShadow = false;
+      top -= layer.depth;
+    }
+    // Rocky underside so the tile floats rather than ending in a flat slab
+    const rand = seededRandom(5);
+    const rock = new THREE.MeshStandardMaterial({ color: SOIL_LAYERS[2].color, roughness: 1, flatShading: true });
+    const count = Math.round((w * d) / 80);
+    for (let i = 0; i < count; i++) {
+      const r = 1.2 + rand() * 2.2, h = 1.5 + rand() * 3.5;
+      const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, 5), rock);
+      m.rotation.x = Math.PI;
+      m.position.set(tile.minX + r + rand() * (w - 2 * r), top - h / 2 + 0.2, tile.minZ + r + rand() * (d - 2 * r));
+      this.group.add(m);
+    }
+  }
 
   private buildStreet(): void {
     const { road, pavementWidth } = this.layout;
