@@ -1,0 +1,96 @@
+/* Control-room look: 3D stage with KPI overlay and time controls on the left,
+   live circuit list on the right (stacks under the stage on narrow screens). */
+:root {
+  --bg: #0e1318; --panel: #151c23; --panel-2: #1b242c; --line: #2a3540; --fg: #dde5ec; --muted: #8796a3;
+  /* Status colours: keep in step with src/render/colors.ts */
+  --ok: #2fbf8f; --warn: #f0a531; --high: #ec5a52; --off: #5d6873; --accent: #63b3ff;
+  --display: "Saira Condensed", "Arial Narrow", sans-serif;
+  --body: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); }
+body { font-family: var(--body); font-size: 15px; line-height: 1.5; }
+button { font: inherit; color: inherit; }
+
+.app { max-width: 1280px; margin: 0 auto; padding: 18px max(16px, env(safe-area-inset-left)) 28px; display: flex; flex-direction: column; gap: 14px; }
+.top { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 8px 20px; }
+.eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+h1 { font-family: var(--display); font-weight: 700; font-size: 38px; letter-spacing: .02em; line-height: 1; margin: 0; }
+h2 { font-family: var(--display); font-weight: 700; font-size: 20px; letter-spacing: .04em; text-transform: uppercase; margin: 0; }
+.proj { font-family: var(--mono); font-size: 12.5px; color: var(--muted); margin: 0; }
+.proj b { color: var(--fg); font-weight: 500; }
+.muted { color: var(--muted); }
+.error { white-space: pre-wrap; font-family: var(--mono); font-size: 13px; color: var(--high); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px; }
+
+.st-ok { --st: var(--ok); } .st-warn { --st: var(--warn); } .st-high { --st: var(--high); } .st-off { --st: var(--off); }
+
+.sim { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .sim { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- 3D stage ---------- */
+.stage-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.stage-wrap { position: relative; aspect-ratio: 16 / 10; max-height: 74vh; width: 100%; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--panel); }
+@media (max-width: 600px) { .stage-wrap { aspect-ratio: 4 / 5; } }
+.stage { position: absolute; inset: 0; }
+.stage canvas { display: block; touch-action: none; }
+.scene-labels { position: absolute; inset: 0; pointer-events: none; }
+.fallback { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: 16px; text-align: center; color: var(--muted); font-family: var(--mono); font-size: 13px; }
+
+.scene-label { font-family: var(--mono); font-size: 10.5px; line-height: 1.25; text-align: center; white-space: nowrap;
+  color: var(--fg); background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border: 1px solid var(--line); border-left: 3px solid var(--st, var(--ok)); border-radius: 3px; padding: 2px 6px; }
+.scene-label b { display: block; font-family: var(--body); font-weight: 600; font-size: 11px; }
+.scene-label.tag { border-left-width: 1px; color: var(--muted); }
+.scene-label.alarm span { color: var(--high); font-weight: 500; }
+
+.kpis { position: absolute; top: 10px; left: 10px; z-index: 2; pointer-events: none; display: grid; grid-template-columns: repeat(5, auto);
+  gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; max-width: calc(100% - 20px); }
+@media (max-width: 700px) { .kpis { grid-template-columns: repeat(2, auto); } .kpis .k-time { grid-column: 1 / -1; } }
+.kpi { background: color-mix(in srgb, var(--bg) 88%, transparent); padding: 6px 12px 7px; }
+.kpi span { display: block; font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.kpi b { display: block; font-family: var(--display); font-weight: 700; font-size: 24px; line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.kpi small { display: block; font-family: var(--mono); font-size: 10.5px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.kpi b.exp { color: var(--ok); }
+.kpi.st-high b, .kpi.st-off b { color: var(--st); }
+.hint { position: absolute; left: 10px; bottom: 8px; z-index: 2; margin: 0; pointer-events: none; font-family: var(--mono); font-size: 11px;
+  background: color-mix(in srgb, var(--bg) 75%, transparent); padding: 3px 8px; border-radius: 3px; max-width: calc(100% - 20px); }
+
+/* ---------- time controls ---------- */
+.controls { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 10px 12px; align-items: center;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
+@media (max-width: 600px) { .controls { grid-template-columns: auto minmax(0, 1fr); } }
+.btn { font-size: 13px; font-weight: 500; line-height: 1; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 9px 12px; cursor: pointer; white-space: nowrap; }
+.btn:hover { border-color: var(--muted); }
+.btn.play { width: 76px; background: var(--accent); color: #07121d; border-color: var(--accent); font-weight: 600; }
+.btn:focus-visible, .row:focus-visible, input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.slider { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
+.ticks { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+
+/* ---------- circuit list ---------- */
+.circuits { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px 14px 10px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.circuits header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 6px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.legend i, .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--st); margin-right: 5px; vertical-align: 1px; }
+.circuits ol { list-style: none; margin: 0; padding: 0; }
+.circuits li + li .row { border-top: 1px solid var(--line); }
+.row { width: 100%; text-align: left; background: none; border: 0; border-radius: 3px; cursor: pointer;
+  display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; padding: 8px 4px; }
+.row:hover { background: var(--panel-2); }
+.row[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+.nm, .val { display: block; min-width: 0; }
+.nm b { font-weight: 600; font-size: 14px; }
+.nm small, .val small { display: block; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.val { text-align: right; font-variant-numeric: tabular-nums; }
+.val b { font-family: var(--mono); font-weight: 500; font-size: 13.5px; }
+.row.alarm .val b, .row.alarm .val small { color: var(--high); }
+.bar { grid-column: 2 / -1; position: relative; display: block; height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
+.bar i { position: absolute; inset: 0 auto 0 0; background: var(--st); border-radius: 3px; }
+.bar s { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); }
+/* Breaker heat: thin stripe along the bottom of the bar */
+.bar em { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--high); }
+.main-line { display: flex; justify-content: space-between; gap: 8px; margin: 0; padding-top: 8px; border-top: 1px solid var(--line);
+  font-family: var(--mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.main-line b { color: var(--fg); font-weight: 500; }
