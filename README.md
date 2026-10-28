@@ -11,6 +11,9 @@ one villa first, then two villas, a building, a village and a city. Good choices
 
 A level opens once the one before it has at least one star. Best results are kept in the browser.
 
+Every level sits in a small village: a street with pavements and lamps that light up at dusk, palms and shade trees,
+lawns and footpaths, and a pond with reeds and ripples. The scenery is decoration only; it never changes the results.
+
 ## Run it
 
 ```bash
@@ -95,7 +98,8 @@ src/game/                game rules: pure TypeScript, like src/sim
   runDay.ts              scored day: frames, events, energy, peaks
   score.ts               points, stars and lesson cards
   hints.ts               Learn mode: each room's highest current
-src/render/SiteScene.ts  Three.js site: villas, feeder pillar, cables. Reads results only.
+src/render/SiteScene.ts  Three.js site: villas, flats, feeder pillar, riser, cables. Reads results only.
+src/render/Landscape.ts  street, lamps, trees, lawns and pond (landscapeLayout.ts places them, tested)
 src/ui/                  React HUD and app shell
 ```
 
