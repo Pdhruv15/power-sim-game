@@ -1,0 +1,16 @@
+{
+  "project": "Villa 2BR — sample",
+  "orientation": 20,
+  "supply": { "voltage": 230, "mainBreakerA": 63 },
+  "solarKw": 5,
+  "circuits": [
+    { "id": "C1", "room": "Majlis",         "type": "lighting", "kw": 0.9, "breakerA": 6 },
+    { "id": "C2", "room": "Living",         "type": "ac",       "kw": 3.0, "breakerA": 20 },
+    { "id": "C3", "room": "Dining",         "type": "lighting", "kw": 0.6, "breakerA": 6 },
+    { "id": "C4", "room": "Kitchen",        "type": "sockets",  "kw": 3.0, "breakerA": 20 },
+    { "id": "C5", "room": "Master Bedroom", "type": "ac",       "kw": 3.0, "breakerA": 16 },
+    { "id": "C6", "room": "Bedroom 2",      "type": "ac",       "kw": 2.4, "breakerA": 10 },
+    { "id": "C7", "room": "Bathroom",       "type": "sockets",  "kw": 1.8, "breakerA": 10 },
+    { "id": "C8", "room": "Laundry",        "type": "sockets",  "kw": 2.0, "breakerA": 16 }
+  ]
+}
