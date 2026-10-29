@@ -1,6 +1,6 @@
 {
   "name": "power-sim-game",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "description": "Learning game for electrical power distribution: run the power for a villa, then a village and a city.",
   "type": "module",

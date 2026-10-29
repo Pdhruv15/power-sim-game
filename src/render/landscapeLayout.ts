@@ -43,6 +43,8 @@ export interface Pond {
 }
 
 export interface LandscapeLayout {
+  /** The block of land the game sits on. Everything else stays inside it. */
+  tile: Rect;
   road: { z: number; width: number; minX: number; maxX: number };
   /** Pavement strips on each side of the road. */
   pavementWidth: number;
@@ -60,6 +62,10 @@ export const PAVEMENT_WIDTH = 1.6;
 const LAMP_SPACING = 14;
 const LAWN_MARGIN = 2.5;
 const CLEARANCE = 1.2;
+/** Keep tree canopies off the tile's edge. */
+const TILE_EDGE_MARGIN = 1.6;
+/** Ground in front of the street, so the tile does not end at the kerb. */
+const TILE_FRONT_MIN = 6;
 
 /** Small seeded random generator (mulberry32), so the scenery is the same on every load. */
 export function seededRandom(seed: number): () => number {
@@ -85,14 +91,22 @@ export function layoutLandscape(input: LayoutInput, seed = 7): LandscapeLayout {
     { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity },
   );
   const minX = site.minX - input.reach, maxX = site.maxX + input.reach;
-  const road = { z: input.roadZ, width: ROAD_WIDTH, minX: minX - 20, maxX: maxX + 20 };
+  const tile: Rect = {
+    minX, maxX, minZ: site.minZ - input.reach,
+    maxZ: input.roadZ + ROAD_WIDTH / 2 + PAVEMENT_WIDTH + Math.max(TILE_FRONT_MIN, input.reach * 0.6),
+  };
+  // The street runs right across the tile and is cut off at its edges
+  const road = { z: input.roadZ, width: ROAD_WIDTH, minX, maxX };
   const roadBand: Rect = { minX: road.minX, maxX: road.maxX, minZ: road.z - ROAD_WIDTH / 2 - PAVEMENT_WIDTH, maxZ: road.z + ROAD_WIDTH / 2 + PAVEMENT_WIDTH };
 
   // Lamps along the near pavement, evenly spaced and centred on the site
   const lamps: LandscapeLayout['lamps'] = [];
   const lampZ = road.z - ROAD_WIDTH / 2 - PAVEMENT_WIDTH / 2;
   const half = Math.floor((maxX - minX) / 2 / LAMP_SPACING);
-  for (let i = -half; i <= half; i++) lamps.push({ x: (site.minX + site.maxX) / 2 + i * LAMP_SPACING, z: lampZ });
+  for (let i = -half; i <= half; i++) {
+    const x = (site.minX + site.maxX) / 2 + i * LAMP_SPACING;
+    if (x > minX + 1 && x < maxX - 1) lamps.push({ x, z: lampZ });
+  }
 
   // A footpath from the pavement to the front of each unit (ground-floor rows only reach the street)
   const frontZ = Math.max(...input.units.map(u => u.maxZ));
@@ -112,18 +126,21 @@ export function layoutLandscape(input: LayoutInput, seed = 7): LandscapeLayout {
     grow(roadBand, 0.3),
     ...paths.map(p => grow(p, 0.6)),
   ];
-  const free = (x: number, z: number, pad: number) => !blocked.some(r => inside(grow(r, pad), x, z)) && !inPond(pond, x, z, pad + 1);
+  const onTile = (x: number, z: number) => inside(grow(tile, -TILE_EDGE_MARGIN), x, z);
+  const free = (x: number, z: number, pad: number) =>
+    onTile(x, z) && !blocked.some(r => inside(grow(r, pad), x, z)) && !inPond(pond, x, z, pad + 1);
 
   // Palms along the far pavement, between the lamps
   const trees: Tree[] = [];
   const palmZ = road.z + ROAD_WIDTH / 2 + PAVEMENT_WIDTH + 1.2;
   for (let i = -half; i < half; i++) {
     const x = (site.minX + site.maxX) / 2 + (i + 0.5) * LAMP_SPACING;
+    if (x < minX + TILE_EDGE_MARGIN || x > maxX - TILE_EDGE_MARGIN) continue;
     trees.push({ x, z: palmZ, kind: 'palm', scale: 0.9 + rand() * 0.3, turn: rand() * Math.PI * 2 });
   }
 
   // Shade trees scattered around the site, spaced apart
-  const area: Rect = { minX, maxX, minZ: site.minZ - input.reach, maxZ: road.z + ROAD_WIDTH / 2 + PAVEMENT_WIDTH + input.reach * 0.6 };
+  const area = grow(tile, -TILE_EDGE_MARGIN); // trees keep off the tile's edge
   const wanted = Math.round(((area.maxX - area.minX) * (area.maxZ - area.minZ)) / 45);
   for (let tries = 0; tries < wanted * 12 && trees.length < wanted; tries++) {
     const x = area.minX + rand() * (area.maxX - area.minX);
@@ -147,8 +164,8 @@ export function layoutLandscape(input: LayoutInput, seed = 7): LandscapeLayout {
   for (let k = 0; k < 7; k++) {
     const a = (k / 7) * Math.PI * 2 + rand() * 0.4;
     const x = pond.x + Math.cos(a) * (pond.rx + 1.3), z = pond.z + Math.sin(a) * (pond.rz + 1.3);
-    if (!blocked.some(r => inside(r, x, z))) bushes.push({ x, z, scale: 0.5 + rand() * 0.4 });
+    if (onTile(x, z) && !blocked.some(r => inside(r, x, z))) bushes.push({ x, z, scale: 0.5 + rand() * 0.4 });
   }
 
-  return { road, pavementWidth: PAVEMENT_WIDTH, lamps, paths, lawns, pond, trees, bushes };
+  return { tile, road, pavementWidth: PAVEMENT_WIDTH, lamps, paths, lawns, pond, trees, bushes };
 }
