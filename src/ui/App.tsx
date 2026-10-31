@@ -171,6 +171,7 @@ function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
         </div>
         <p className="proj">
           <b>{design.project}</b> · {threePhase ? `${design.voltage}/${Math.round(design.voltage * Math.sqrt(3))} V three-phase` : `${design.voltage} V`}
+          {design.transformer && ` · ${design.transformer.kva} kVA transformer`}
           {' '}· main {topBoard(design).breakerA} A{pv > 0 && ` · PV ${pv} kWp`}
           <span className="phase">{phase.kind === 'design' ? 'Design' : phase.kind === 'run' ? 'Running the day' : 'Result'}</span>
         </p>

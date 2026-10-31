@@ -1,12 +1,13 @@
-import { BANDS, cableAmps, PHASES, topBoard, type Level } from '../sim';
+import { BANDS, cableAmps, PHASES, topBoard, TRANSFORMER_ID, type Level } from '../sim';
 import { designCost } from './catalog';
 import { fmt, hhmm } from './format';
+import { connectedKva } from './hints';
 import type { DayRun } from './runDay';
 
 /** The sizing rule every level builds on. */
 export const SIZING_RULE = 'Room current ≤ breaker ≤ cable';
 
-export type ScoreKey = 'supply' | 'safety' | 'loading' | 'voltage' | 'balance' | 'protection' | 'cost' | 'solar';
+export type ScoreKey = 'supply' | 'safety' | 'loading' | 'voltage' | 'balance' | 'protection' | 'transformer' | 'cost' | 'solar';
 
 export interface ScorePart {
   key: ScoreKey;
@@ -39,9 +40,9 @@ export const DEFAULT_POINTS: Readonly<Partial<Record<ScoreKey, number>>> = { sup
 
 const LABELS: Record<ScoreKey, string> = {
   supply: 'Power kept on', safety: 'Safe design', loading: 'Healthy loading', voltage: 'Voltage at the rooms',
-  balance: 'Balanced phases', protection: 'Short circuit handled', cost: 'Within budget', solar: 'Solar share',
+  balance: 'Balanced phases', protection: 'Short circuit handled', transformer: 'Transformer size', cost: 'Within budget', solar: 'Solar share',
 };
-const ORDER: ScoreKey[] = ['supply', 'safety', 'loading', 'voltage', 'balance', 'protection', 'cost', 'solar'];
+const ORDER: ScoreKey[] = ['supply', 'safety', 'loading', 'voltage', 'balance', 'protection', 'transformer', 'cost', 'solar'];
 
 /** Each unsafe breaker costs half the safety points, each busy breaker a third of the loading points, and so on. */
 const UNSAFE_SHARE = 1 / 2;
@@ -52,6 +53,8 @@ const IMBALANCE_SHARE = 1 / 2;
 export const MAX_DROP_PCT = 5;
 /** A three-phase board is unbalanced when its quietest phase is this much below its busiest at peak. */
 export const MAX_IMBALANCE = 0.25;
+/** A transformer below this at its busiest moment is bigger than it needs to be. */
+export const MIN_TRANSFORMER_LOADING = 0.5;
 const OVER_BUDGET_SLOPE = 4;     // 25 % over budget loses all cost points
 const SOLAR_TARGET_SHARE = 0.3;  // full solar points when solar covers 30 % of the day's energy
 const STARS = { one: 500, two: 750, three: 900 };
@@ -224,6 +227,44 @@ export function scoreDay(level: Level, day: DayRun): ScoreCard {
       }
     }
     points.protection = Math.max(0, max('protection') - lost);
+  }
+
+  // ---- Transformer size: big enough for the busiest moment, not for every room at once
+  const tx = level.transformer;
+  const txPeak = day.transformerPeak;
+  if (tx && txPeak) {
+    const allAtOnce = fmt(connectedKva(level), 0);
+    const at = day.tripHour.get(TRANSFORMER_ID);
+    points.transformer = max('transformer');
+    if (at !== undefined) {
+      points.transformer = 0;
+      mistakes.push({
+        kind: 'mistake', target: TRANSFORMER_ID, title: 'Transformer too small',
+        text: `The busiest phase needed ${fmt(txPeak.amps, 0)} A, ${pct(txPeak.loading)} % of what ${tx.kva} kVA can give each phase. ` +
+          `The transformer overheated and switched off at ${hhmm(at)}, and everything lost power. ` +
+          'Pick a bigger size, and spread the load over the three phases.',
+      });
+    } else if (txPeak.loading > BANDS.high) {
+      points.transformer /= 2;
+      warnings.push({
+        kind: 'warning', target: TRANSFORMER_ID, title: 'Transformer close to the limit',
+        text: `The busiest phase reached ${pct(txPeak.loading)} % of what ${tx.kva} kVA can give at ${hhmm(txPeak.hour)}. ` +
+          'A hotter day could overheat it. Keep the normal peak under 90 %.',
+      });
+    } else if (txPeak.loading < MIN_TRANSFORMER_LOADING) {
+      points.transformer /= 2;
+      warnings.push({
+        kind: 'warning', target: TRANSFORMER_ID, title: 'Transformer bigger than it needs to be',
+        text: `The busiest phase only reached ${pct(txPeak.loading)} % of what ${tx.kva} kVA can give. ` +
+          `Every room at once would be ${allAtOnce} kVA, but homes, shops and schools do not peak together, so a smaller size is enough.`,
+      });
+    } else {
+      good.push({
+        kind: 'good', title: 'Transformer well sized',
+        text: `The busiest phase reached ${pct(txPeak.loading)} % of ${tx.kva} kVA at ${hhmm(txPeak.hour)}. ` +
+          `Every room at once would be ${allAtOnce} kVA, but homes, shops and schools do not peak together.`,
+      });
+    }
   }
 
   // ---- Cost against the level budget

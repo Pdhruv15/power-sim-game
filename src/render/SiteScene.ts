@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
-import { PHASES, type Board, type Circuit, type Level, type SimResult } from '../sim';
+import { PHASES, topBoard, TRANSFORMER_ID, type Board, type Circuit, type Level, type SimResult } from '../sim';
 import { STATUS, statusColor } from './colors';
-import { boardLabelVisible, roomLabelVisible, type LabelMode, type RoomState } from './labelRules';
+import { boardLabelVisible, inBlackout, roomLabelVisible, type LabelMode, type RoomState } from './labelRules';
 import { CABLE_DEPTH, Landscape } from './Landscape';
 import { Sky } from './Sky';
 import { layoutLandscape, PAVEMENT_WIDTH, ROAD_WIDTH, type Rect } from './landscapeLayout';
@@ -12,6 +12,12 @@ import { layoutLandscape, PAVEMENT_WIDTH, ROAD_WIDTH, type Rect } from './landsc
 const ROOM = 4.4, WALL_H = 2.8, WALL_T = 0.14, CORRIDOR = 1.4, DOOR = 1.0, BASE = 0.2;
 const VILLA_GAP = 7;             // between villas
 const FLAT_GAP = 0.3;            // between flats in a building
+const HOME_GAP = 3;              // between homes in a village row
+const LANE = 8;                  // between village rows, with the lane cables down the middle
+const LANE_CABLE_Z = 2.6;        // each row's cable, this far from the middle of the lane
+const PILLAR_WEST = 1.5;         // village: lane pillars west of the rows
+const MAIN_WEST = 7;             // village: top board west of the rows
+const TRANSFORMER_WEST = 14;     // village: transformer west of the rows
 const FLOOR_H = BASE + WALL_H + 0.25; // storey height
 const RISER_SETBACK = 1.8;       // riser and boards beside the building's west end
 const SKY_RADIUS = 260;          // inside the camera's far plane
@@ -135,8 +141,17 @@ export class SiteScene {
     this.hemi.intensity = 0.15 + 0.85 * day;
     this.sky?.setSunHeight(height);
     this.scene.background = this.sky?.haze ?? null;
-    this.supply?.mat.color.copy(statusColor(r.main.band, r.main.dead));
+    const tx = r.transformer;
+    this.supply?.mat.color.copy(tx ? statusColor(tx.band, tx.tripped) : statusColor(r.main.band, r.main.dead));
     this.landscape?.setDaylight(day);
+    const txParts = this.boards.get(TRANSFORMER_ID);
+    if (tx && txParts) {
+      txParts.cableMat?.color.copy(statusColor(tx.band, tx.tripped));
+      txParts.marker.visible = tx.tripped;
+      txParts.state = { band: tx.band, overloaded: tx.overloaded, tripped: tx.tripped, dead: tx.tripped };
+      txParts.label.className = `scene-label tag st-${tx.tripped ? 'off' : tx.band}${tx.tripped || tx.overloaded ? ' alarm' : ''}`;
+      txParts.label.lastChild!.textContent = tx.tripped ? 'OVERHEATED' : `${tx.loadKva.toFixed(0)} / ${tx.kva} kVA`;
+    }
 
     for (const c of r.circuits) {
       const rm = this.rooms.get(c.id);
@@ -194,13 +209,15 @@ export class SiteScene {
 
   /** Apply the label mode, hover, clicked rooms and hidden floors to every label. */
   private refreshLabels(): void {
+    const blackout = this.boards.get(TRANSFORMER_ID)?.state.tripped ?? false;
+    const shown = (s: RoomState) => (blackout ? inBlackout(s) : s);
     for (const [id, rm] of this.rooms) {
-      rm.labelObj.visible = rm.floor <= this.floorLimit && roomLabelVisible(this.labelMode, rm.state, this.faded.has(id), this.hovered === id);
+      rm.labelObj.visible = rm.floor <= this.floorLimit && roomLabelVisible(this.labelMode, shown(rm.state), this.faded.has(id), this.hovered === id);
     }
     // Boards that feed the room under the pointer or a clicked room
     const related = new Set([this.hovered, ...this.faded].filter((id): id is string => !!id).map(id => this.roomBoard.get(id)));
     for (const [id, bp] of this.boards) {
-      bp.labelObj.visible = bp.floor <= this.floorLimit && boardLabelVisible(this.labelMode, bp.state, bp.isTop, related.has(id));
+      bp.labelObj.visible = bp.floor <= this.floorLimit && boardLabelVisible(this.labelMode, id === TRANSFORMER_ID ? bp.state : shown(bp.state), bp.isTop, related.has(id));
     }
     if (this.supply) this.supply.labelObj.visible = this.labelMode !== 'off';
   }
@@ -244,21 +261,28 @@ export class SiteScene {
   /**
    * Units (villas or flats) in a row per floor. Villas stand apart with a feeder pillar in front;
    * flats in a building sit side by side, floors stacked, with the main and floor boards on a riser at the west end.
+   * A village has rows of homes facing a lane, with the transformer, top board and lane pillars at the lane's west end.
    */
   private buildSite(level: Level): void {
     const building = level.boards.some(b => b.floor !== undefined && b.floor > 0);
-    const gap = building ? FLAT_GAP : VILLA_GAP;
+    const village = level.boards.some(b => b.row !== undefined);
+    const gap = building ? FLAT_GAP : village ? HOME_GAP : VILLA_GAP;
     const units = level.boards.filter(b => level.circuits.some(c => c.board === b.id));
     const floorOf = (b: Board) => b.floor ?? 0;
     const topFloor = Math.max(...units.map(floorOf));
     const sizeOf = new Map(units.map(b => [b.id, villaSize(level.circuits.filter(c => c.board === b.id).length)]));
-    const floors = [...new Set(units.map(floorOf))].sort((a, b) => a - b);
-    const rowWidth = (f: number) => {
-      const row = units.filter(b => floorOf(b) === f);
+    // A line of units: a floor in a building, a row in a village
+    const lineOf = (b: Board) => (building ? floorOf(b) : b.row ?? 0);
+    const lines = [...new Set(units.map(lineOf))].sort((a, b) => a - b);
+    const rowWidth = (l: number) => {
+      const row = units.filter(b => lineOf(b) === l);
       return row.reduce((s, b) => s + sizeOf.get(b.id)!.W, 0) + gap * (row.length - 1);
     };
-    const rowW = Math.max(...floors.map(rowWidth));
+    const rowW = Math.max(...lines.map(rowWidth));
     const maxD = Math.max(...units.map(b => sizeOf.get(b.id)!.D));
+    const lineZ = (l: number) => (building ? 0 : (lines.indexOf(l) - (lines.length - 1) / 2) * (maxD + LANE));
+    const frontZ = Math.max(...lines.map(lineZ)) + maxD / 2;
+    const backZ = Math.min(...lines.map(lineZ)) - maxD / 2;
     this.site.rotation.y = -THREE.MathUtils.degToRad(level.orientation); // clockwise from north
     this.scene.add(this.site);
 
@@ -266,27 +290,32 @@ export class SiteScene {
     const dbAt = new Map<string, THREE.Vector3>();
     const footprints: Rect[] = [];
     const keepClear: Rect[] = [];
-    for (const f of floors) {
-      let x = -rowWidth(f) / 2;
-      for (const b of units.filter(u => floorOf(u) === f)) {
+    for (const l of lines) {
+      let x = -rowWidth(l) / 2;
+      for (const b of units.filter(u => lineOf(u) === l)) {
         const { W } = sizeOf.get(b.id)!;
+        const f = floorOf(b);
         const g = new THREE.Group();
-        g.position.set(x + W / 2, f * FLOOR_H, 0);
+        g.position.set(x + W / 2, f * FLOOR_H, lineZ(l));
         this.site.add(g);
         if (f > 0) this.floorObjects.push({ floor: f, obj: g });
-        const db = this.buildVilla(g, b, level.circuits.filter(c => c.board === b.id), units.length > 1, floorOf(b) === topFloor);
+        const db = this.buildVilla(g, b, level.circuits.filter(c => c.board === b.id), units.length > 1, f === topFloor);
         dbAt.set(b.id, db.add(g.position));
-        if (f === floors[0]) footprints.push(around(g.position.x, 0, W / 2 + 0.3, sizeOf.get(b.id)!.D / 2 + 0.3));
+        if (!building || l === lines[0]) footprints.push(around(g.position.x, g.position.z, W / 2 + 0.3, sizeOf.get(b.id)!.D / 2 + 0.3));
         x += W + gap;
       }
     }
 
-    // Boards without rooms: a feeder pillar in front of villas, or main and floor boards on the building's riser
+    // Boards without rooms: a feeder pillar in front of villas, main and floor boards on the building's riser,
+    // or a village's top board and lane pillars at the lane's west end, each pillar on its own row's side of the lane
     const others = level.boards.filter(b => !dbAt.has(b.id));
     others.forEach((b, i) => {
+      const firstUnit = units.find(u => u.parent === b.id);
       const at = building
         ? new THREE.Vector3(-rowW / 2 - RISER_SETBACK, floorOf(b) * FLOOR_H, b.parent === null ? 2.5 : 0)
-        : new THREE.Vector3((i - (others.length - 1) / 2) * 4, 0, maxD / 2 + PILLAR_SETBACK);
+        : village
+          ? new THREE.Vector3(-rowW / 2 - (b.parent === null ? MAIN_WEST : PILLAR_WEST), 0, firstUnit ? Math.sign(lineZ(lineOf(firstUnit))) * LANE_CABLE_Z : 0)
+          : new THREE.Vector3((i - (others.length - 1) / 2) * 4, 0, maxD / 2 + PILLAR_SETBACK);
       const cabinet = box(0.9, 1.4, 0.5, mat(0x6f7a85, { metalness: 0.3 }), at.x, at.y + 0.7, at.z, this.site);
       if (floorOf(b) > 0) this.floorObjects.push({ floor: floorOf(b), obj: cabinet });
       dbAt.set(b.id, at);
@@ -314,22 +343,51 @@ export class SiteScene {
       if (parts) parts.cableMat = cableMat;
     }
 
+    // The transformer stands beside the top board, and the street supply comes to it instead
+    const top = dbAt.get(topBoard(level).id)!;
+    const supplyAt = level.transformer ? new THREE.Vector3(-rowW / 2 - TRANSFORMER_WEST, 0, top.z) : top;
+    if (level.transformer) {
+      this.buildTransformer(level.transformer.name, supplyAt, top);
+      keepClear.push(around(supplyAt.x, supplyAt.z, 2, 1.6), { minX: supplyAt.x, maxX: top.x, minZ: top.z - 0.2, maxZ: top.z + 0.2 });
+    }
+
     // Street in front (past the feeder pillar when there is one), trees, lawns and a pond around the site
-    const pillar = others.length > 0 && !building;
-    const roadZ = maxD / 2 + (pillar ? PILLAR_SETBACK + 0.6 : 3) + PAVEMENT_WIDTH + ROAD_WIDTH / 2;
+    const pillar = others.length > 0 && !building && !village;
+    const roadZ = frontZ + (pillar ? PILLAR_SETBACK + 0.6 : 3) + PAVEMENT_WIDTH + ROAD_WIDTH / 2;
     this.landscape = new Landscape(layoutLandscape({ units: footprints, keepClear, roadZ, reach: Math.max(14, rowW * 0.5) }));
     this.site.add(this.landscape.group);
-    this.buildSupplyCable(dbAt.get(level.boards.find(b => b.parent === null)!.id)!, this.landscape.tile);
+    this.buildSupplyCable(supplyAt, this.landscape.tile);
 
     const height = (topFloor + 1) * FLOOR_H;
-    const siteSpan = Math.max(rowW + (building ? RISER_SETBACK * 2 : 0), maxD + (others.length && !building ? PILLAR_SETBACK * 2 : 0), height * 1.4);
+    const siteSpan = Math.max(rowW + (building ? RISER_SETBACK * 2 : village ? TRANSFORMER_WEST * 2 : 0), frontZ - backZ + (pillar ? PILLAR_SETBACK * 2 : 0), height * 1.4);
     const { tile } = this.landscape;
     const tileSpan = Math.max(tile.maxX - tile.minX, tile.maxZ - tile.minZ);
     // Start a little wider than the site so the tile's edge and the sky around it are in view
     this.span = Math.max(siteSpan, tileSpan * 0.65);
     this.panLimit = tileSpan * 0.45;
     this.controls.target.set(0, height / 2, 0);
-    this.addLabel(this.scene, 'N ↑', new THREE.Vector3(0, 0, -maxD / 2 - 4), 'scene-label tag'); // north is world −z
+    this.addLabel(this.scene, 'N ↑', new THREE.Vector3(0, 0, backZ - 4), 'scene-label tag'); // north is world −z
+  }
+
+  /** Transformer on a concrete pad: tank, cooling fins and three bushings, with a status band and a cable to the top board. */
+  private buildTransformer(name: string, at: THREE.Vector3, top: THREE.Vector3): void {
+    const steel = mat(0x7d8894, { metalness: 0.4 });
+    box(4, 0.2, 3, mat(0xa8a39a), at.x, 0.1, at.z, this.site);
+    box(2, 1.8, 1.4, steel, at.x, 1.1, at.z, this.site);
+    for (const side of [-1, 1]) {
+      for (let k = -2; k <= 2; k++) box(0.1, 1.4, 0.3, steel, at.x + k * 0.4, 1.05, at.z + side * 0.85, this.site);
+    }
+    for (let k = -1; k <= 1; k++) {
+      const bushing = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.14, 0.6, 10), mat(0xd9dee3));
+      bushing.position.set(at.x + k * 0.6, 2.3, at.z);
+      this.site.add(bushing);
+    }
+    const statusMat = new THREE.MeshBasicMaterial({ color: STATUS.ok });
+    box(2.04, 0.12, 1.44, statusMat, at.x, 1.85, at.z, this.site, false);
+    box(top.x - at.x, 0.06, 0.18, statusMat, (at.x + top.x) / 2, 0.06, at.z, this.site, false);
+    const parts = this.boardParts({ name, parent: null }, new THREE.Vector3(at.x, 3.6, at.z), null);
+    parts.cableMat = statusMat;
+    this.boards.set(TRANSFORMER_ID, parts);
   }
 
   /** One villa, centred on its group. Returns where its board sits, in the group's coordinates. */
@@ -427,7 +485,7 @@ export class SiteScene {
     roof.visible = false;
   }
 
-  private boardParts(board: Board, labelAt: THREE.Vector3, parent: THREE.Object3D | null, name = board.name): BoardParts {
+  private boardParts(board: Pick<Board, 'name' | 'parent' | 'floor'>, labelAt: THREE.Vector3, parent: THREE.Object3D | null, name = board.name): BoardParts {
     const host = parent ?? this.site;
     const label = this.addLabel(host, name, labelAt, 'scene-label tag');
     label.append(document.createElement('span'));

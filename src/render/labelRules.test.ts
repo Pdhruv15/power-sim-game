@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boardLabelVisible, roomLabelVisible, type RoomState } from './labelRules';
+import { boardLabelVisible, inBlackout, roomLabelVisible, type RoomState } from './labelRules';
 
 const calm: RoomState = { band: 'ok', overloaded: false, tripped: false, dead: false };
 
@@ -20,6 +20,11 @@ describe('roomLabelVisible', () => {
     }
     expect(roomLabelVisible('smart', calm, true, false)).toBe(true);
     expect(roomLabelVisible('smart', calm, false, true)).toBe(true);
+  });
+
+  it('hides rooms that are only dead in a blackout, but keeps tripped ones', () => {
+    expect(roomLabelVisible('smart', inBlackout({ ...calm, dead: true }), false, false)).toBe(false);
+    expect(roomLabelVisible('smart', inBlackout({ ...calm, dead: true, tripped: true }), false, false)).toBe(true);
   });
 });
 

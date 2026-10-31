@@ -19,6 +19,9 @@ export interface RoomState {
 /** True when a room is worth flagging on its own: running above 90 %, overloaded, tripped or without power. */
 export const needsAttention = (r: RoomState): boolean => r.band === 'high' || r.overloaded || r.tripped || r.dead;
 
+/** With the transformer off everything is dead. Its own label says why, so one label per room adds only clutter. */
+export const inBlackout = (r: RoomState): RoomState => ({ ...r, dead: false });
+
 export function roomLabelVisible(mode: LabelMode, room: RoomState, selected: boolean, hovered: boolean): boolean {
   if (mode === 'all') return true;
   if (mode === 'off') return false;

@@ -8,6 +8,7 @@ one villa first, then two villas, a building, a village and a city. Good choices
 | 1 · One villa | Breaker and cable sizing, daily load profiles, solar |
 | 2 · Two villas | Three-phase supply, phase balance, feeder cables, voltage drop over distance |
 | 3 · Apartment building | Main board, floor boards on a riser, flats on phases, short circuits and which breaker trips |
+| 4 · Village | Transformer sizing, why the busiest moment is less than every room at once, long lane feeders |
 
 A level opens once the one before it has at least one star. Best results are kept in the browser.
 
@@ -79,13 +80,26 @@ expected short-circuit current at the room and each board's instant-trip current
 
 Level 3 scores supply 250, safety 150, healthy loading 100, voltage 100, balanced phases 100, short circuit handled 200 and budget 100.
 
+## Level 4
+
+A transformer feeds a village board, which feeds a pillar in each of two lanes. Each lane has three homes, and one has a
+school and the other a shop. The 50 kVA transformer is too small, everything starts on L1, and the south lane's feeder is too thin.
+
+Add up every room and you get 85 kVA, but homes, the school and the shop peak at different times, so the busiest moment is
+69 kVA. The transformer's size is shared by the three phases, so its busiest phase decides how loaded it is. Above its size
+it heats like a breaker, only four times slower, and when it gets too hot the whole village loses power. Keep its busiest
+phase between 50 % and 90 % of its size for full points: smaller is risky, bigger is money wasted.
+
+Level 4 scores supply 250, safety 150, healthy loading 100, voltage 150, balanced phases 100, transformer size 150 and budget 100.
+
 ## Level files
 
 Levels live in `public/data/`. Level 1 uses a short villa format (`supply.mainBreakerA`, `solarKw`, `circuits`).
 Other levels list `boards` (each with `parent`, `breakerA`, `phases` and a feeder `cable` of `mm2` and `lengthM`)
 and `circuits` with `board`, `phase` and `lengthM`. A single-phase board on a three-phase parent sets its own `phase`,
 and `floor` stacks boards with rooms into storeys. `faults` lists short circuits (`hour`, `circuit`, `text`), and
-`supply.sourceOhms` sets the supply's own resistance. `points` sets which score parts a level uses.
+`supply.sourceOhms` sets the supply's own resistance. `transformer` (`name`, `kva`) puts a transformer above a three-phase
+top board, and `row` lays boards with rooms out in village rows. `points` sets which score parts a level uses.
 `parseLevel` checks every file and lists all problems it finds.
 
 ## Layout
@@ -97,7 +111,8 @@ src/sim/                 simulation: pure TypeScript, no Three.js, React or DOM
   profiles.ts            24-hour demand profiles per load type
   sun.ts                 sun position and solar output
   breaker.ts             simple breaker: heats when overloaded, trips at once on a short circuit
-  network.ts             supply tree (grid → boards → loads) with per-phase currents, ready for transformers
+  transformer.ts         simple transformer: rating per phase, slow overheating, voltage drop, resistance
+  network.ts             supply tree (grid → transformer → boards → loads) with per-phase currents
   simulate.ts            Simulator: setHour / advance / result
   cables.ts              cable sizes, the current each can carry, and voltage drop
 src/game/                game rules: pure TypeScript, like src/sim
@@ -105,7 +120,7 @@ src/game/                game rules: pure TypeScript, like src/sim
   runDay.ts              scored day: frames, events, energy, peaks
   score.ts               points, stars and lesson cards
   hints.ts               Learn mode: each room's highest current
-src/render/SiteScene.ts  Three.js site: villas, flats, feeder pillar, riser, cables. Reads results only.
+src/render/SiteScene.ts  Three.js site: villas, flats, village rows, transformer, feeder pillars, riser, cables. Reads results only.
 src/render/Landscape.ts  the land tile, street, lamps, trees, lawns and pond (landscapeLayout.ts places them, tested)
 src/render/Sky.ts        gradient sky dome and stars
 src/ui/                  React HUD and app shell
@@ -121,6 +136,7 @@ src/ui/                  React HUD and app shell
 - Phases count as unbalanced when the quietest phase is more than 25 % below the busiest at the board's peak.
 - Short-circuit current uses resistance only (supply plus phase and neutral of every cable). If no breaker trips at once,
   the one that heats up first opens, and the fault counts as not cleared at once.
+- A transformer loses 2 % of the voltage at full load. Its resistance is set so that 4 % of the voltage would drive full-load current through a shorted output.
 - Sun rises at 06:00, sets at 18:00 and peaks at 55°. Solar output = kWp × 0.85 × sun height.
 - Solar connects at the DB and stops when the main breaker trips.
 - Cable ratings are rounded game values for copper cable in a wall: 1.5 mm² 16 A, 2.5 mm² 24 A, 4 mm² 32 A, 6 mm² 40 A, 10 mm² 55 A.

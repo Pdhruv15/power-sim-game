@@ -1,7 +1,7 @@
 /** Load types. Each has its own daily demand profile. */
-export type LoadType = 'lighting' | 'sockets' | 'ac';
+export type LoadType = 'lighting' | 'sockets' | 'ac' | 'shop' | 'school';
 
-export const LOAD_TYPES: readonly LoadType[] = ['lighting', 'sockets', 'ac'];
+export const LOAD_TYPES: readonly LoadType[] = ['lighting', 'sockets', 'ac', 'shop', 'school'];
 
 /** Supply phases. A single-phase board uses L1 only. */
 export type Phase = 'L1' | 'L2' | 'L3';
@@ -16,7 +16,7 @@ export interface Cable {
 
 /**
  * A distribution board. The board with no parent is fed from the grid, and its breaker is the main breaker.
- * Village and city levels will add transformers above this.
+ * Village and city levels add a transformer above this.
  */
 export interface Board {
   id: string;
@@ -33,6 +33,15 @@ export interface Board {
   phase: Phase;
   /** Storey for drawing (0 = ground). Boards without a floor stand outside. */
   floor?: number;
+  /** Row for drawing a village, numbered north to south. */
+  row?: number;
+}
+
+/** Transformer between the higher-voltage street network and the top board. */
+export interface Transformer {
+  name: string;
+  /** Size in kVA, shared by the three phases. */
+  kva: number;
 }
 
 /** A short circuit at the end of a room's cable, at a set time of day. */
@@ -72,6 +81,8 @@ export interface Level {
   orientation: number;
   /** Phase voltage. Three-phase boards have this between each phase and neutral. */
   voltage: number;
+  /** Feeds the top board. Without one the top board is fed straight from the grid. */
+  transformer?: Transformer;
   boards: Board[];
   circuits: Circuit[];
   /** Spending limit for the design, in credits. */

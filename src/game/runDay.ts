@@ -1,10 +1,10 @@
-import { BANDS, Simulator, topBoard, type FaultResult, type Level, type PhaseAmps, type SimResult } from '../sim';
+import { BANDS, Simulator, topBoard, TRANSFORMER_ID, type FaultResult, type Level, type PhaseAmps, type SimResult } from '../sim';
 import { fmt } from './format';
 
 /** Fixed step for a scored day: 3 minutes, 480 frames. The same frames drive the replay. */
 export const DAY_STEP_HOURS = 0.05;
 
-export type DayEventKind = 'trip' | 'board-trip' | 'main-trip' | 'high' | 'fault';
+export type DayEventKind = 'trip' | 'board-trip' | 'main-trip' | 'transformer-trip' | 'high' | 'fault';
 
 export interface DayEvent {
   hour: number;
@@ -54,6 +54,8 @@ export interface DayRun {
   mainTripHour: number | null;
   /** Peak of the top board. */
   mainPeak: BoardPeak;
+  /** Peak of the transformer while it was on, in levels that have one. */
+  transformerPeak: Peak | null;
   /** Short circuits from the level file and how the breakers handled them. */
   faults: DayFault[];
   /** Breakers opened by a short circuit rather than by overload. */
@@ -71,6 +73,7 @@ export function runDay(level: Level): DayRun {
   const peaks = new Map<string, Peak>();
   const boardPeaks = new Map<string, BoardPeak>(level.boards.map(b => [b.id, { loading: 0, amps: 0, hour: 0, phaseAmps: [0, 0, 0], imbalance: 0 }]));
   const drops = new Map<string, WorstDrop>();
+  const transformerPeak: Peak | null = level.transformer ? { loading: 0, amps: 0, hour: 0 } : null;
   const tripHour = new Map<string, number>();
   const warned = new Set<string>();
   const faults: DayFault[] = [];
@@ -104,6 +107,14 @@ export function runDay(level: Level): DayRun {
         Object.assign(p, { loading: b.loading, amps: b.amps, hour, phaseAmps: [...b.phaseAmps], imbalance: b.imbalance });
       }
     }
+    const tx = r.transformer;
+    if (tx && transformerPeak && !tx.tripped && tx.loading > transformerPeak.loading) {
+      Object.assign(transformerPeak, { loading: tx.loading, amps: tx.amps, hour });
+    }
+    if (tx && !tx.tripped && tx.loading > BANDS.high && !warned.has(TRANSFORMER_ID)) {
+      warned.add(TRANSFORMER_ID);
+      events.push({ hour, kind: 'high', target: TRANSFORMER_ID, text: `${tx.name} went above 90 % of its size` });
+    }
     energy.solar += r.solarKw * dt;
     energy.solarUsed += Math.min(r.solarKw, r.loadKw) * dt;
     energy.grid += Math.max(0, r.gridKw) * dt;
@@ -127,6 +138,10 @@ export function runDay(level: Level): DayRun {
 
     // Record breakers that opened during this step
     const after = sim.result();
+    if (after.transformer?.tripped && !tripHour.has(TRANSFORMER_ID)) {
+      tripHour.set(TRANSFORMER_ID, hour + dt);
+      events.push({ hour: hour + dt, kind: 'transformer-trip', target: TRANSFORMER_ID, text: `${after.transformer.name} overheated and switched off: everything lost power` });
+    }
     for (const c of after.circuits) {
       if (c.tripped && !tripHour.has(c.id)) {
         tripHour.set(c.id, hour + dt);
@@ -144,6 +159,6 @@ export function runDay(level: Level): DayRun {
 
   return {
     frames, events, energy, peaks, boardPeaks, drops, tripHour,
-    mainTripHour: tripHour.get(topId) ?? null, mainPeak: boardPeaks.get(topId)!, faults, faultTripped,
+    mainTripHour: tripHour.get(topId) ?? null, mainPeak: boardPeaks.get(topId)!, transformerPeak, faults, faultTripped,
   };
 }

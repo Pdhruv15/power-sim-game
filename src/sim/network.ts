@@ -1,8 +1,9 @@
+import { transformerRatedAmps } from './transformer';
 import { phaseIndex, type Level } from './types';
 
 /**
- * Equipment kinds in the supply tree: grid → boards → loads.
- * Village and city levels add transformers (and MV/HV sources) without changing this model.
+ * Equipment kinds in the supply tree: grid → transformer → boards → loads.
+ * City levels can add more transformers (and MV/HV sources) without changing this model.
  */
 export type NodeKind = 'grid' | 'transformer' | 'board' | 'load';
 
@@ -25,14 +26,17 @@ export interface Network {
 export type PhaseAmps = [number, number, number];
 
 export const GRID_ID = 'GRID';
+export const TRANSFORMER_ID = 'TX';
 
-/** Supply tree for a level: grid → top board → sub-boards → one load per circuit. */
+/** Supply tree for a level: grid → transformer (if any) → top board → sub-boards → one load per circuit. */
 export function levelNetwork(level: Level): Network {
+  const tx = level.transformer;
   return {
     voltage: level.voltage,
     nodes: [
       { id: GRID_ID, kind: 'grid', name: 'Utility supply', parent: null },
-      ...level.boards.map((b): NetworkNode => ({ id: b.id, kind: 'board', name: b.name, parent: b.parent ?? GRID_ID, breakerA: b.breakerA })),
+      ...(tx ? [{ id: TRANSFORMER_ID, kind: 'transformer', name: tx.name, parent: GRID_ID, breakerA: transformerRatedAmps(tx.kva, level.voltage) } satisfies NetworkNode] : []),
+      ...level.boards.map((b): NetworkNode => ({ id: b.id, kind: 'board', name: b.name, parent: b.parent ?? (tx ? TRANSFORMER_ID : GRID_ID), breakerA: b.breakerA })),
       ...level.circuits.map((c): NetworkNode => ({ id: c.id, kind: 'load', name: c.room, parent: c.board, breakerA: c.breakerA })),
     ],
   };

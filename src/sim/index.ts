@@ -5,5 +5,6 @@ export * from './cables';
 export * from './profiles';
 export * from './sun';
 export * from './breaker';
+export * from './transformer';
 export * from './network';
 export * from './simulate';
