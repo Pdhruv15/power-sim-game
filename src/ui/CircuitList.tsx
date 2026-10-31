@@ -1,7 +1,7 @@
-import { PHASES, type BoardResult, type CircuitResult, type SimResult } from '../sim';
+import { PHASES, type BoardResult, type CircuitResult, type SimResult, type TransformerResult } from '../sim';
 import { fmt } from './format';
 
-const TYPE_NAME = { ac: 'AC', lighting: 'Lighting', sockets: 'Sockets' } as const;
+const TYPE_NAME = { ac: 'AC', lighting: 'Lighting', sockets: 'Sockets', shop: 'Shop', school: 'School' } as const;
 
 interface Props {
   result: SimResult;
@@ -26,6 +26,7 @@ export function CircuitList({ result, selected, onSelect }: Props) {
           <span className="st-off"><i />off</span>
         </span>
       </header>
+      {result.transformer && <div className="board-group"><TransformerRow t={result.transformer} /></div>}
       {result.boards.map(b => {
         const rooms = result.circuits.filter(c => c.board === b.id);
         return (
@@ -62,6 +63,23 @@ export function CircuitList({ result, selected, onSelect }: Props) {
         </p>
       )}
     </section>
+  );
+}
+
+function TransformerRow({ t }: { t: TransformerResult }) {
+  return (
+    <div className={`row board st-${t.tripped ? 'off' : t.band}${t.tripped || t.overloaded ? ' alarm' : ''}`}>
+      <span className="dot" />
+      <span className="nm">
+        <b>{t.name}</b>
+        <small>{t.kva} kVA · {fmt(t.ratedA, 0)} A per phase</small>
+      </span>
+      <span className="val">
+        <b>{t.tripped ? 'OVERHEATED' : `${fmt(t.loading * 100, 0)}%`}</b>
+        <small>{t.tripped ? '' : `${fmt(t.loadKva)} kVA`}</small>
+      </span>
+      <LoadBar loading={t.tripped ? 0 : t.loading} heat={t.tripped ? 0 : t.heat} />
+    </div>
   );
 }
 

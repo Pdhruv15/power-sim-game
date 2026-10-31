@@ -1,6 +1,6 @@
 import { CABLE_AMPS, CABLE_SIZES, DEFAULT_CABLE } from './cables';
-import { GRID_ID } from './network';
-import { LOAD_TYPES, PHASES, type Board, type Circuit, type FaultEvent, type Level, type LoadType, type Phase } from './types';
+import { GRID_ID, TRANSFORMER_ID } from './network';
+import { LOAD_TYPES, PHASES, type Board, type Circuit, type FaultEvent, type Level, type LoadType, type Phase, type Transformer } from './types';
 
 /** Thrown when a level file is not valid. The message lists every problem found. */
 export class LevelError extends Error {
@@ -42,6 +42,7 @@ export function parseLevel(raw: unknown): Level {
   const villaFormat = !Array.isArray(raw.boards);
   const boards = villaFormat ? villaBoard(raw, supply, problems) : parseBoards(raw.boards as unknown[], problems);
   const circuits = parseCircuits(raw.circuits, boards, villaFormat, problems);
+  const transformer = parseTransformer(raw.transformer, boards, problems);
 
   const sourceOhms = supply.sourceOhms ?? DEFAULT_SOURCE_OHMS;
   if (!isPositive(sourceOhms)) problems.push('supply.sourceOhms: must be a positive number of ohms');
@@ -62,6 +63,7 @@ export function parseLevel(raw: unknown): Level {
     ...(typeof raw.intro === 'string' && raw.intro && { intro: raw.intro }),
     orientation: orientation as number,
     voltage: supply.voltage as number,
+    ...(transformer && { transformer }),
     boards,
     circuits,
     ...(budget !== undefined && { budget: budget as number }),
@@ -69,6 +71,15 @@ export function parseLevel(raw: unknown): Level {
     sourceOhms: sourceOhms as number,
     faults,
   };
+}
+
+function parseTransformer(raw: unknown, boards: Board[], problems: string[]): Transformer | undefined {
+  if (raw === undefined) return undefined;
+  const t = isObj(raw) ? raw : {};
+  if (!isPositive(t.kva)) problems.push('transformer.kva: must be a positive number');
+  // The transformer shares its size across three phases, so the board it feeds must use all three
+  if (boards.some(b => b.parent === null && b.phases !== 3)) problems.push('transformer: the top board must be three-phase');
+  return { name: typeof t.name === 'string' && t.name ? t.name : 'Transformer', kva: Number(t.kva) };
 }
 
 /** Level 1 files describe one single-phase board through `supply` and `solarKw`. */
@@ -92,6 +103,7 @@ function parseBoards(list: unknown[], problems: string[]): Board[] {
     if (!id) problems.push(`${at}.id: missing`);
     else if (seen.has(id)) problems.push(`${at}.id: "${id}" is used twice`);
     else if (id === GRID_ID) problems.push(`${at}.id: "${GRID_ID}" is reserved for the grid supply`);
+    else if (id === TRANSFORMER_ID) problems.push(`${at}.id: "${TRANSFORMER_ID}" is reserved for the transformer`);
     seen.add(id);
     const parent = b.parent ?? null;
     if (parent !== null && typeof parent !== 'string') problems.push(`${at}.parent: must be a board id or null`);
@@ -110,10 +122,12 @@ function parseBoards(list: unknown[], problems: string[]): Board[] {
     const phase = b.phase ?? 'L1';
     if (!PHASES.includes(phase as Phase)) problems.push(`${at}.phase: must be one of ${PHASES.join(', ')}`);
     if (b.floor !== undefined && !(Number.isInteger(b.floor) && (b.floor as number) >= 0)) problems.push(`${at}.floor: must be 0 or a whole number above`);
+    if (b.row !== undefined && !(Number.isInteger(b.row) && (b.row as number) >= 0)) problems.push(`${at}.row: must be 0 or a whole number above`);
     boards.push({
       id, name: typeof b.name === 'string' && b.name ? b.name : id, parent: parent as string | null,
       breakerA: Number(b.breakerA), phases: phases as 1 | 3, cable, solarKw: Number(solarKw), phase: phase as Phase,
       ...(b.floor !== undefined && { floor: b.floor as number }),
+      ...(b.row !== undefined && { row: b.row as number }),
     });
   });
 
@@ -147,6 +161,7 @@ function parseCircuits(list: unknown, boards: Board[], villaFormat: boolean, pro
     const id = typeof c.id === 'string' ? c.id.trim() : '';
     if (!id) problems.push(`${at}.id: missing`);
     else if (seen.has(id)) problems.push(`${at}.id: "${id}" is used twice`);
+    else if (id === TRANSFORMER_ID) problems.push(`${at}.id: "${TRANSFORMER_ID}" is reserved for the transformer`);
     seen.add(id);
     const board = villaFormat ? VILLA_BOARD_ID : c.board;
     if (typeof board !== 'string' || !boardIds.has(board)) problems.push(`${at}.board: must be one of ${[...boardIds].join(', ')}`);

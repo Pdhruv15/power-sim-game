@@ -48,7 +48,8 @@ h2 { font-family: var(--display); font-weight: 700; font-size: 20px; letter-spac
 
 .kpis { position: absolute; top: 10px; left: 10px; z-index: 2; pointer-events: none; display: grid; grid-template-columns: repeat(5, auto);
   gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; max-width: calc(100% - 20px); }
-@media (max-width: 700px) { .kpis { grid-template-columns: repeat(2, auto); } .kpis .k-time { grid-column: 1 / -1; } }
+.kpis.six { grid-template-columns: repeat(6, auto); }
+@media (max-width: 700px) { .kpis, .kpis.six { grid-template-columns: repeat(2, auto); } .kpis .k-time { grid-column: 1 / -1; } }
 .kpi { background: color-mix(in srgb, var(--bg) 88%, transparent); padding: 6px 12px 7px; }
 .kpi span { display: block; font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
 .kpi b { display: block; font-family: var(--display); font-weight: 700; font-size: 24px; line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; }

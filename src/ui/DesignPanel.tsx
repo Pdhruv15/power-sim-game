@@ -1,11 +1,13 @@
 import { useMemo } from 'react';
 import {
-  BOARD_BREAKER_SIZES, BREAKER_SIZES, DEFAULT_POINTS, designCost, peakNeeds, SIZING_RULE, SOLAR_OPTIONS, type PeakNeed,
+  BOARD_BREAKER_SIZES, BREAKER_SIZES, connectedKva, DEFAULT_POINTS, designCost, peakNeeds, SIZING_RULE, SOLAR_OPTIONS, TRANSFORMER_SIZES, type PeakNeed,
 } from '../game';
-import { BOARD_INSTANT_TRIP, CABLE_SIZES, cableAmps, INSTANT_TRIP, PHASES, Simulator, type Board, type Circuit, type Level, type Phase } from '../sim';
+import {
+  BOARD_INSTANT_TRIP, CABLE_SIZES, cableAmps, INSTANT_TRIP, PHASES, Simulator, topBoard, transformerRatedAmps, type Board, type Circuit, type Level, type Phase,
+} from '../sim';
 import { fmt, hhmm } from './format';
 
-const TYPE_NAME = { ac: 'AC', lighting: 'Lighting', sockets: 'Sockets' } as const;
+const TYPE_NAME = { ac: 'AC', lighting: 'Lighting', sockets: 'Sockets', shop: 'Shop', school: 'School' } as const;
 
 interface Props {
   design: Level;
@@ -32,6 +34,7 @@ export function DesignPanel({ design, onChange, onRestore, onRun }: Props) {
   const over = budget !== null && cost > budget;
   const solarScored = ((design.points ?? DEFAULT_POINTS).solar ?? 0) > 0;
   const hasPhases = design.boards.some(b => b.phases === 3);
+  const tx = design.transformer;
 
   const setCircuit = (id: string, patch: Partial<Circuit>) =>
     onChange({ ...design, circuits: design.circuits.map(c => (c.id === id ? { ...c, ...patch } : c)) });
@@ -45,6 +48,24 @@ export function DesignPanel({ design, onChange, onRestore, onRun }: Props) {
         <span className="rule" title="Sizing rule">{SIZING_RULE}</span>
       </header>
       {design.intro && <p className="intro">{design.intro}</p>}
+
+      {tx && (
+        <section className="board-block">
+          <div className="board-head">
+            <div className="nm">
+              <b>{tx.name}</b>
+              <small>Every room at once: {fmt(connectedKva(design), 0)} kVA · busiest moment: {fmt(needs.total.kva, 0)} kVA at {hhmm(needs.total.hour)}</small>
+              <small>Busiest phase: {fmt((needs.boards.get(topBoard(design).id)!.amps / transformerRatedAmps(tx.kva, design.voltage)) * 100, 0)} % of this size</small>
+            </div>
+            <label>
+              <span>Size</span>
+              <select id="tx-kva" value={tx.kva} onChange={e => onChange({ ...design, transformer: { ...tx, kva: Number(e.target.value) } })}>
+                {withCurrent(TRANSFORMER_SIZES, tx.kva).map(k => <option key={k} value={k}>{k} kVA</option>)}
+              </select>
+            </label>
+          </div>
+        </section>
+      )}
 
       {boardsTopDown(design).map(b => {
         const rooms = design.circuits.filter(c => c.board === b.id);

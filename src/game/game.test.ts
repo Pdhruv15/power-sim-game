@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseLevel, type Level } from '../sim';
-import { designCost, hhmm, peakNeeds, runDay, scoreDay } from './index';
+import { connectedKva, designCost, hhmm, peakNeeds, runDay, scoreDay } from './index';
 
 const sample = (): Level =>
   parseLevel(JSON.parse(readFileSync(new URL('../../public/data/villa.json', import.meta.url), 'utf8')));
@@ -218,5 +218,82 @@ describe('Level 3: apartment building', () => {
     const e = runDay(building()).events.find(x => x.kind === 'fault')!;
     expect(e.hour).toBeCloseTo(19.5);
     expect(e.text).toMatch(/518 A\. Opened at once: Kitchen, Flat 2B/);
+  });
+});
+
+describe('Level 4: village', () => {
+  const village = (): Level =>
+    parseLevel(JSON.parse(readFileSync(new URL('../../public/data/village.json', import.meta.url), 'utf8')));
+  /** Load spread over the phases, feeders that can carry their breakers, and a thicker cable to the far home. */
+  function fixedVillage(kva: number): Level {
+    const l = village();
+    const ph = ['L1', 'L2', 'L3'] as const;
+    const board = (id: string) => l.boards.find(b => b.id === id)!;
+    l.transformer!.kva = kva;
+    ['H1', 'H2', 'H3', 'H4', 'H5', 'H6'].forEach((id, i) => { board(id).phase = ph[i % 3]; });
+    l.circuits.filter(c => c.board === 'SCH' || c.board === 'SHP').forEach((c, i) => { c.phase = ph[i % 3]; });
+    board('NL').breakerA = 80;
+    board('SL').breakerA = 80;
+    board('SL').cable = { mm2: 35, lengthM: 60 };
+    board('H6').cable = { mm2: 16, lengthM: 28 };
+    return l;
+  }
+  const lessons = (l: Level) => score(l).lessons.map(x => x.title);
+
+  it('scores the starting wiring at 0 stars and explains why', () => {
+    const s = score(village());
+    expect(s.stars).toBe(0);
+    expect(s.parts.map(p => p.key)).toEqual(['supply', 'safety', 'loading', 'voltage', 'balance', 'transformer', 'cost']);
+    expect(s.parts.find(p => p.key === 'transformer')!.points).toBe(0);
+    expect(s.lessons[0].kind).toBe('mistake');
+    expect(lessons(village())).toEqual(expect.arrayContaining([
+      'Transformer too small', 'Breaker bigger than the feeder cable: South lane pillar', 'Phases unbalanced: Village board',
+    ]));
+  });
+
+  it('gives full marks when the transformer fits the busiest moment', () => {
+    const s = score(fixedVillage(100));
+    expect(s.total).toBe(1000);
+    expect(s.stars).toBe(3);
+    expect(s.lessons.map(x => x.title)).toContain('Transformer well sized');
+    expect(s.cost).toBeLessThanOrEqual(s.budget!);
+  });
+
+  it('switches everything off when the transformer is too small', () => {
+    const day = runDay(fixedVillage(50));
+    const off = day.events.find(e => e.kind === 'transformer-trip')!;
+    expect(off.text).toMatch(/overheated and switched off/);
+    expect(day.energy.supplied).toBeLessThan(day.energy.demand * 0.5);
+    expect(day.frames.at(-1)!.circuits.every(c => c.dead)).toBe(true);
+    expect(lessons(fixedVillage(50))).toContain('Transformer too small');
+    expect(lessons(fixedVillage(50))).not.toContain('Power stayed on all day');
+  });
+
+  it('warns about a transformer running close to its limit', () => {
+    const l = fixedVillage(100);
+    l.transformer!.kva = 80;
+    const s = score(l);
+    expect(s.parts.find(p => p.key === 'transformer')!.points).toBe(150); // 87 % is still healthy
+    l.circuits.filter(c => c.board === 'SHP').forEach(c => { c.kw = 6; });
+    expect(lessons(l)).toContain('Transformer close to the limit');
+    expect(score(l).parts.find(p => p.key === 'transformer')!.points).toBe(75);
+  });
+
+  it('warns about a transformer bigger than it needs to be', () => {
+    const s = score(fixedVillage(160));
+    expect(s.parts.find(p => p.key === 'transformer')!.points).toBe(75);
+    expect(s.lessons.map(x => x.title)).toContain('Transformer bigger than it needs to be');
+  });
+
+  it('adds the transformer to the cost', () => {
+    expect(designCost(fixedVillage(160)) - designCost(fixedVillage(100))).toBe(700);
+  });
+
+  it('shows that the busiest moment is less than every room at once', () => {
+    const l = village();
+    const { total } = peakNeeds(l);
+    expect(connectedKva(l)).toBeCloseTo(85.3, 1);
+    expect(total.kva).toBeCloseTo(69.3, 1);
+    expect(total.hour).toBe(12);
   });
 });

@@ -1,8 +1,9 @@
 import { BOARD_INSTANT_TRIP, hoursToTrip, INSTANT_TRIP, NEW_BREAKER, stepBreaker, type BreakerState } from './breaker';
 import { cableDropV, loopOhms } from './cables';
-import { branchCurrents, levelNetwork, maxPhase, onPhase, type Network, type PhaseAmps } from './network';
+import { branchCurrents, levelNetwork, maxPhase, onPhase, TRANSFORMER_ID, type Network, type PhaseAmps } from './network';
 import { POWER_FACTOR, profileAt, wrapHour } from './profiles';
 import { pvOutput, sunAt, type Sun } from './sun';
+import { stepTransformer, transformerDropPct, transformerOhms, transformerRatedAmps } from './transformer';
 import { PHASES, topBoard, type LoadType, type Level, type Phase } from './types';
 
 /** Loading bands as a fraction of breaker rating: green < 60 %, orange 60–90 %, red > 90 %. */
@@ -65,6 +66,25 @@ export interface BoardResult {
   solarKw: number;
 }
 
+export interface TransformerResult {
+  name: string;
+  kva: number;
+  /** Current each phase can carry. */
+  ratedA: number;
+  phaseAmps: PhaseAmps;
+  /** Highest phase current: this decides how loaded the transformer is. */
+  amps: number;
+  /** What all three phases draw together. */
+  loadKva: number;
+  /** Busiest phase ÷ rated amps. */
+  loading: number;
+  band: Band;
+  overloaded: boolean;
+  /** 0–1, 1 = switches off. */
+  heat: number;
+  tripped: boolean;
+}
+
 /** What happened when a room's cable shorted. */
 export interface FaultResult {
   circuit: string;
@@ -95,6 +115,8 @@ export interface SimResult {
   gridKw: number;
   /** The top board, fed from the grid. Its breaker is the main breaker. */
   main: BoardResult;
+  /** The transformer feeding the top board, in levels that have one. */
+  transformer: TransformerResult | null;
 }
 
 /**
@@ -128,6 +150,10 @@ export class Simulator {
       for (const node of this.network.nodes) {
         if (!node.breakerA) continue;
         const loading = maxPhase(flow.branch.get(node.id)!) / node.breakerA;
+        if (node.kind === 'transformer') {
+          this.breakers.set(node.id, stepTransformer(this.breaker(node.id), loading, dt));
+          continue;
+        }
         const instant = node.kind === 'board' ? BOARD_INSTANT_TRIP : INSTANT_TRIP;
         this.breakers.set(node.id, stepBreaker(this.breaker(node.id), loading, dt, instant));
       }
@@ -144,6 +170,8 @@ export class Simulator {
   faultAmps(circuitId: string): number {
     const c = this.level.circuits.find(x => x.id === circuitId)!;
     let ohms = this.level.sourceOhms + loopOhms(c.cableMm2, c.lengthM);
+    const tx = this.level.transformer;
+    if (tx) ohms += transformerOhms(tx.kva, this.level.voltage);
     for (let b = this.board(c.board); b; b = b.parent ? this.board(b.parent) : undefined) {
       if (b.cable) ohms += loopOhms(b.cable.mm2, b.cable.lengthM);
     }
@@ -188,6 +216,7 @@ export class Simulator {
   result(): SimResult {
     const { sun, solar, demand, branch } = this.flow(this.hour);
     const V = this.level.voltage;
+    const transformer = this.transformerResult(branch);
 
     // Boards, parents before children so voltage drop can build up from the supply
     const boards: BoardResult[] = [];
@@ -204,7 +233,7 @@ export class Simulator {
       const r: BoardResult = {
         id: b.id, name: b.name, parent: b.parent, phases: b.phases, phase: b.phase, phaseAmps, amps, ratingA: b.breakerA,
         loading, band: bandOf(loading), overloaded: !dead && loading > 1, heat: state.heat, tripped: state.tripped, dead,
-        vdPct: (b.parent ? byId.get(b.parent)!.vdPct : 0) + (feederDrop / V) * 100,
+        vdPct: (b.parent ? byId.get(b.parent)!.vdPct : transformerDropPct(transformer?.loading ?? 0)) + (feederDrop / V) * 100,
         imbalance, solarKw: solar.get(b.id) ?? 0,
       };
       boards.push(r);
@@ -229,7 +258,23 @@ export class Simulator {
     const solarKw = [...solar.values()].reduce((s, k) => s + k, 0);
     return {
       hour: this.hour, sun, circuits, boards, loadKw, loadA: circuits.reduce((s, c) => s + c.amps, 0),
-      solarKw, gridKw: loadKw - solarKw, main: byId.get(topBoard(this.level).id)!,
+      solarKw, gridKw: loadKw - solarKw, main: byId.get(topBoard(this.level).id)!, transformer,
+    };
+  }
+
+  private transformerResult(branch: Map<string, PhaseAmps>): TransformerResult | null {
+    const tx = this.level.transformer;
+    if (!tx) return null;
+    const V = this.level.voltage;
+    const phaseAmps = branch.get(TRANSFORMER_ID)!;
+    const amps = maxPhase(phaseAmps);
+    const ratedA = transformerRatedAmps(tx.kva, V);
+    const loading = amps / ratedA;
+    const state = this.breaker(TRANSFORMER_ID);
+    return {
+      name: tx.name, kva: tx.kva, ratedA, phaseAmps, amps,
+      loadKva: (phaseAmps.reduce((s, a) => s + Math.abs(a), 0) * V) / 1000,
+      loading, band: bandOf(loading), overloaded: !state.tripped && loading > 1, heat: state.heat, tripped: state.tripped,
     };
   }
 
