@@ -53,16 +53,18 @@ export interface Mission {
   stars: readonly [string, string, string];
   /** Steps a bought hint reveals. */
   hint: readonly string[];
+  /** Number on each part's two connection points. Matching numbers are wired together. */
+  guide: Partial<Record<PartKind, readonly [number, number]>>;
 }
 
 export const PART_INFO: Readonly<Record<PartKind, { name: string; a: string; b: string; watts?: number }>> = {
   battery: { name: 'Battery', a: '+', b: '−' },
   supply: { name: 'Street supply', a: 'L', b: 'N' },
-  switch: { name: 'Switch', a: '', b: '' },
-  breaker: { name: 'Breaker', a: '', b: '' },
-  lamp: { name: 'Lamp', a: '', b: '', watts: 12 },
-  light: { name: 'Room light', a: '', b: '', watts: 230 },
-  socket: { name: 'Socket and kettle', a: '', b: '', watts: 3450 },
+  switch: { name: 'Switch', a: 'IN', b: 'OUT' },
+  breaker: { name: 'Breaker', a: 'IN', b: 'OUT' },
+  lamp: { name: 'Lamp', a: 'IN', b: 'OUT', watts: 12 },
+  light: { name: 'Room light', a: 'L', b: 'N', watts: 230 },
+  socket: { name: 'Socket and kettle', a: 'L', b: 'N', watts: 3450 },
 };
 
 export const MISSIONS: Readonly<Record<string, Mission>> = {
@@ -70,21 +72,23 @@ export const MISSIONS: Readonly<Record<string, Mission>> = {
     id: 'level-circuit', kind: 'circuit', title: 'Single circuit',
     goal: 'Light the lamp from the battery, and make the switch turn it on and off.',
     tray: { battery: 1, switch: 1, lamp: 1 }, volts: 12, sourceOhms: 0.5, wireLengthM: 1, cables: [1.5], breakers: [], budget: null,
-    stars: ['The lamp lights up', 'The switch controls the lamp', 'No spare wires'],
-    hint: ['Battery + to one side of the switch.', 'The other side of the switch to the lamp.', 'The other side of the lamp to battery −.'],
+    stars: ['The lamp lights up', 'The switch controls the lamp', 'IN and OUT the right way, no spare wires'],
+    hint: ['Battery + to switch IN.', 'Switch OUT to lamp IN.', 'Lamp OUT to battery −.'],
+    guide: { battery: [1, 3], switch: [1, 2], lamp: [2, 3] },
   },
   'level-room': {
     id: 'level-room', kind: 'room', title: 'One room',
     goal: 'Power the light and the kettle socket from the street. A faulty kettle must not be able to start a fire.',
     tray: { supply: 1, breaker: 2, light: 1, socket: 1 }, volts: 230, sourceOhms: 0.03, wireLengthM: 5,
     cables: [1.5, 2.5], breakers: [6, 10, 16, 20], budget: 110,
-    stars: ['The light and kettle both work', 'Safe in a fault: breaker on L, big enough cable', 'Within budget, breaker under 90 %, no spare wires'],
+    stars: ['The light and kettle both work', 'Safe in a fault: breaker on L, big enough cable', 'Within budget, breaker under 90 %, IN and OUT the right way, no spare wires'],
     hint: [
-      'Street L to one side of the breaker. Other side of the breaker to the light and to the socket.',
-      'The other side of the light and of the socket to street N.',
+      'Street L to breaker IN. Breaker OUT to L on the light and on the socket.',
+      'N on the light and on the socket to street N.',
       'The room needs 16 A at once, so pick a 20 A breaker.',
       'A 20 A breaker needs 2.5 mm² cable on every wire.',
     ],
+    guide: { supply: [1, 3], breaker: [1, 2], light: [2, 3], socket: [2, 3] },
   },
 };
 
@@ -182,6 +186,10 @@ function joined(b: Build, open: readonly string[] = []) {
   ]);
 }
 
+/** A part whose second connection point is nearer the source than its first. */
+const backwardsPart = (reach: ReturnType<typeof joined>, parts: readonly PlacedPart[], source: Terminal) =>
+  parts.find(p => reach(`${p.id}.b`, source) && !reach(`${p.id}.a`, source));
+
 const report = (steps: TestStep[], stars: 0 | 1 | 2 | 3, tip: string | null, focus: string | null = null): PowerOnReport =>
   ({ steps, stars, held: stars >= 1, tip, focus });
 
@@ -224,6 +232,10 @@ function testCircuit(m: Mission, b: Build): PowerOnReport {
   const second = step('Switch off', 'The loop opens and the lamp goes out.', true, false);
   const spare = b.wires.find(w => on.wireAmps[w.id] < NO_CURRENT_A);
   if (spare) return report([first, second], 2, 'One wire carries no current. Remove it for the third star.', spare.id);
+  // IN is the side the current reaches first
+  const plus = `${battery.id}.a`;
+  const backwards = backwardsPart(joined(b, [sw.id]), [sw], plus) ?? backwardsPart(joined(b), [lamp], plus);
+  if (backwards) return report([first, second], 2, `The ${PART_INFO[backwards.kind].name.toLowerCase()} is the wrong way round. It still works, but the side nearer battery + should be IN.`, backwards.id);
   return report([first, second], 3, null);
 }
 
@@ -292,6 +304,11 @@ function testRoom(m: Mission, b: Build): PowerOnReport {
     return unsafe('The breaker opens, but the room is still connected to L.',
       `${PART_INFO[liveLoad.kind].name} stays live with its breaker open, which can give a shock. Put breakers on the L side.`, liveLoad.id);
   }
+  const swapped = backwardsPart(joined(b), [light, socket], L);
+  if (swapped) {
+    return unsafe(`The ${PART_INFO[swapped.kind].name} has L and N swapped.`,
+      'It still runs, but it can stay live when it looks safe. Bring the breaker wire to L and the return wire to N.', swapped.id);
+  }
   // Every wire needs a breaker it cannot out-carry: opening that breaker is what stops the wire's current
   for (const w of b.wires) {
     if (both.wireAmps[w.id] < NO_CURRENT_A) continue;
@@ -313,6 +330,8 @@ function testRoom(m: Mission, b: Build): PowerOnReport {
   if (busy) return report(steps, 2, `The ${busy.breakerA} A breaker runs at ${fmt((both.partAmps(busy.id) / (busy.breakerA ?? 1)) * 100, 0)} %. Keep normal peaks under 90 %.`, busy.id);
   const spare = b.wires.find(w => both.wireAmps[w.id] < NO_CURRENT_A);
   if (spare) return report(steps, 2, 'One wire carries no current. Remove it for the third star.', spare.id);
+  const backwards = backwardsPart(dead, breakers, L);
+  if (backwards) return report(steps, 2, `The ${backwards.breakerA} A breaker is the wrong way round. Bring the street to IN and take the room from OUT.`, backwards.id);
   return report(steps, 3, null);
 }
 

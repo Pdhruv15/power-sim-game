@@ -4,17 +4,19 @@ import {
 } from '../game';
 import { CABLE_SIZES, cableAmps, PHASES, type Board, type Level, type Phase } from '../sim';
 import { fmt, hhmm } from './format';
+import { PartIcon, roomIcon, TERM_TITLES } from './PartIcon';
 import { trackDrag } from './trackDrag';
 import { TERMINAL_ATTR, useWireDrag } from './useWireDrag';
+import { draftPath, pathOf, routeWires, type Point, type WireEnd } from './wireRoute';
 
 const BOARD_W = 860;
-const STREET = { x: 16, w: 100, h: 76 };
-const PANEL_W = 136, PANEL_H = 92;
-const ROOM_W = 176, ROOM_H = 100;
-const ROOM_COLS = [456, 668];
+const STREET = { x: 16, w: 100, h: 92 };
+const PANEL_W = 136, PANEL_H = 116;
+const ROOM_W = 168, ROOM_H = 100;
+const ROOM_COLS = [472, 672];
 const ROOM_GAP_Y = 12;
-/** Boards stay left of the rooms. */
-const PANEL_MIN_X = 130, PANEL_MAX_X = ROOM_COLS[0] - PANEL_W - 24;
+/** Boards stay left of the rooms, leaving a channel for the wires. */
+const PANEL_MIN_X = 130, PANEL_MAX_X = ROOM_COLS[0] - PANEL_W - 52;
 const DEFAULT_CABLE = 2.5;
 
 const STREET_OUT = 'street';
@@ -100,7 +102,7 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
     if (child) { setBoard(child.id, { mm2: cable }); return; }
     const room = level.circuits.find(c => pair.includes(roomIn(c.id)) && pair.includes(boardOut(c.board)));
     if (room) { setRoom(room.id, { mm2: cable }); return; }
-    setTip(`That connection does nothing here. Wire the street to the ${nameOf(top).toLowerCase()}, then each board's right side to what it feeds.`);
+    setTip(`That connection does nothing here. Wire the street to IN on the ${nameOf(top).toLowerCase()}, then each board's OUT to what it feeds.`);
   };
   const { preview: wireDraft, startWireDrag, endedDrag } = useWireDrag(area, connect);
 
@@ -114,6 +116,8 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
   const termProps = (t: string, wired: boolean, end: 'a' | 'b') => ({
     [TERMINAL_ATTR]: t,
     className: `term ${end}${pending === t ? ' pending' : ''}${wired ? ' wired' : ''}`,
+    title: TERM_TITLES[end === 'a' ? 'IN' : 'OUT'],
+    children: <span className="term-label">{end === 'a' ? 'IN' : 'OUT'}</span>,
     onPointerDown: (e: React.PointerEvent<HTMLElement>) => startWireDrag(e, t),
     onClick: () => clickTerminal(t),
   });
@@ -155,8 +159,29 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
     trackDrag(e, (x, y) => moveBoard(id, x - dx, y - dy), () => {});
   };
 
-  const inAt = (id: string) => ({ x: spots[id].x, y: spots[id].y + PANEL_H / 2 });
-  const outAt = (id: string) => ({ x: spots[id].x + PANEL_W, y: spots[id].y + PANEL_H / 2 });
+  const inAt = (id: string): WireEnd => ({ x: spots[id].x, y: spots[id].y + PANEL_H / 2, dir: -1 });
+  const outAt = (id: string): WireEnd => ({ x: spots[id].x + PANEL_W, y: spots[id].y + PANEL_H / 2, dir: 1 });
+  const routes = useMemo(() => {
+    const placed = level.boards.filter(b => build.boards[b.id].placed);
+    const boxes = [
+      { left: street.x, right: street.x + STREET.w, top: street.y, bottom: street.y + STREET.h },
+      ...placed.map(b => ({ left: spots[b.id].x, right: spots[b.id].x + PANEL_W, top: spots[b.id].y, bottom: spots[b.id].y + PANEL_H })),
+      ...level.circuits.map((_, i) => { const at = roomAt(i); return { left: at.x, right: at.x + ROOM_W, top: at.y, bottom: at.y + ROOM_H }; }),
+    ];
+    const jobs = [
+      ...(build.supplyWired ? [{ id: STREET_OUT, from: STREET_OUT, to: boardIn(top.id), a: { x: street.x + STREET.w, y: street.y + STREET.h / 2, dir: 1 as const }, b: inAt(top.id) }] : []),
+      ...below.filter(b => build.boards[b.id].mm2 != null)
+        .map(b => ({ id: feederWire(b.id), from: boardOut(b.parent!), to: boardIn(b.id), a: outAt(b.parent!), b: inAt(b.id) })),
+      ...level.circuits.flatMap((c, i) => {
+        if (build.rooms[c.id].mm2 == null) return [];
+        const at = roomAt(i);
+        return [{ id: roomIn(c.id), from: boardOut(c.board), to: roomIn(c.id), a: outAt(c.board), b: { x: at.x, y: at.y + ROOM_H / 2, dir: -1 as const } }];
+      }),
+    ];
+    return routeWires(jobs, BOARD_W, boardH, boxes);
+    // Everything else here follows from the level, which fixes the board's size and the rooms
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [level, build, spots]);
   const preview = useMemo(() => {
     const r = siteDesign(level, build);
     return r.design ? designCost(r.design) : null;
@@ -176,7 +201,7 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
                 key={b.id} id={`tray-${b.id}`} type="button" className="tray-item" disabled={build.boards[b.id].placed}
                 onPointerDown={e => startTrayDrag(e, b)} onClick={() => { if (!dragged.current) placeBoard(b); dragged.current = false; }}
               >
-                <b>{b.name}</b> <small>{build.boards[b.id].placed ? 'placed' : '1 left'}</small>
+                <PartIcon name="board" size={18} /> <b>{b.name}</b> <small>{build.boards[b.id].placed ? 'placed' : '1 left'}</small>
               </button>
             ))}
           </div>
@@ -196,25 +221,25 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
           >
             <svg className="wires" width={BOARD_W} height={boardH} aria-hidden={wired === 0 && !build.supplyWired}>
               {build.supplyWired && (
-                <SiteWire id={STREET_OUT} label={`Street to ${top.name}`} from={{ x: street.x + STREET.w, y: street.y + STREET.h / 2 }} to={inAt(top.id)} mm2={16} selected={selected === STREET_OUT} onSelect={setSelected} />
+                <SiteWire id={STREET_OUT} label={`Street to ${top.name}`} points={routes.get(STREET_OUT)!} mm2={16} selected={selected === STREET_OUT} onSelect={setSelected} />
               )}
               {below.map(b => {
                 const mm2 = build.boards[b.id].mm2;
                 if (mm2 == null) return null;
-                return <SiteWire key={b.id} id={feederWire(b.id)} label={`${b.name} feeder, ${mm2} mm²`} from={outAt(b.parent!)} to={inAt(b.id)} mm2={mm2} selected={selected === feederWire(b.id)} onSelect={setSelected} />;
+                return <SiteWire key={b.id} id={feederWire(b.id)} label={`${b.name} feeder, ${mm2} mm²`} points={routes.get(feederWire(b.id))!} mm2={mm2} selected={selected === feederWire(b.id)} onSelect={setSelected} />;
               })}
-              {level.circuits.map((c, i) => {
+              {level.circuits.map(c => {
                 const mm2 = build.rooms[c.id].mm2;
                 if (mm2 == null) return null;
-                const at = roomAt(i);
-                return <SiteWire key={c.id} id={roomIn(c.id)} label={`${c.room} cable, ${mm2} mm²`} from={outAt(c.board)} to={{ x: at.x, y: at.y + ROOM_H / 2 }} mm2={mm2} selected={selected === roomIn(c.id)} onSelect={setSelected} />;
+                return <SiteWire key={c.id} id={roomIn(c.id)} label={`${c.room} cable, ${mm2} mm²`} points={routes.get(roomIn(c.id))!} mm2={mm2} selected={selected === roomIn(c.id)} onSelect={setSelected} />;
               })}
-              {wireDraft && <line className="wire-preview" x1={wireDraft.x1} y1={wireDraft.y1} x2={wireDraft.x2} y2={wireDraft.y2} />}
+              {wireDraft && <path className="wire-preview" d={draftPath(wireDraft)} />}
             </svg>
 
             {wired === 0 && !build.supplyWired && <p className="board-tip">Drag from one circle to another to add a wire.</p>}
 
             <div className="part kind-supply" style={{ left: street.x, top: street.y, width: STREET.w, height: STREET.h }}>
+              <PartIcon name="supply" />
               <span className="part-name">Street supply</span>
               <button id="term-street" type="button" aria-label="Street supply" {...termProps(STREET_OUT, build.supplyWired, 'b')} />
             </div>
@@ -233,6 +258,7 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
                     if (step[e.key]) { e.preventDefault(); moveBoard(b.id, spots[b.id].x + step[e.key][0], spots[b.id].y + step[e.key][1]); }
                   }}
                 >
+                  <PartIcon name="board" size={24} />
                   <span className="part-name">{nameOf(b)}</span>
                   <small className="part-state">{split}</small>
                   <select
@@ -263,7 +289,7 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
               const owner = level.boards.length > 1 ? `${board.name} · ` : '';
               return (
                 <div key={c.id} id={`room-${c.id}`} role="group" aria-label={`${owner}${c.room}`} className="part room-part" style={{ left: at.x, top: at.y, width: ROOM_W, height: ROOM_H }}>
-                  <span className="part-name">{owner}{c.room}</span>
+                  <span className="part-title"><PartIcon name={roomIcon(c.room)} size={20} /><span className="part-name">{owner}{c.room}</span></span>
                   <small className="part-state">up to {fmt(need?.amps ?? 0)} A at {hhmm(need?.hour ?? 0)}</small>
                   <span className="room-picks">
                     <select
@@ -330,11 +356,10 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
   );
 }
 
-function SiteWire({ id, label, from, to, mm2, selected, onSelect }: {
-  id: string; label: string; from: { x: number; y: number }; to: { x: number; y: number }; mm2: number; selected: boolean; onSelect: (id: string) => void;
+function SiteWire({ id, label, points, mm2, selected, onSelect }: {
+  id: string; label: string; points: readonly Point[]; mm2: number; selected: boolean; onSelect: (id: string) => void;
 }) {
-  const mid = (from.x + to.x) / 2;
-  const d = `M${from.x} ${from.y} C${mid} ${from.y} ${mid} ${to.y} ${to.x} ${to.y}`;
+  const d = pathOf(points);
   return (
     <g className={`wire${selected ? ' sel' : ''}`}>
       <path

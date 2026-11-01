@@ -65,6 +65,40 @@ describe('Level: single circuit', () => {
     expect(dangling.stars).toBe(2);
     expect(dangling.tip).toMatch(/carries no current/);
   });
+
+  it('holds back the third star for a switch or lamp wired the wrong way round', () => {
+    const sw = powerOn(m, build('B.a S.b', 'S.a L.a', 'L.b B.b'));
+    expect(sw.stars).toBe(2);
+    expect(sw.tip).toMatch(/switch is the wrong way round/);
+    expect(sw.focus).toBe('S');
+    const lamp = powerOn(m, build('B.a S.a', 'S.b L.b', 'L.a B.b'));
+    expect(lamp.stars).toBe(2);
+    expect(lamp.tip).toMatch(/lamp is the wrong way round/);
+  });
+});
+
+describe('Level: one room, L, N, IN and OUT', () => {
+  const m = MISSIONS['level-room'];
+  const parts = [part('S', 'supply'), part('K', 'breaker', 20), part('A', 'light'), part('C', 'socket')];
+  const build = (...list: string[]): Build => ({ parts, wires: wires(2.5, ...list) });
+
+  it('gives 3 stars when every label is followed', () => {
+    expect(powerOn(m, build('S.a K.a', 'K.b A.a', 'K.b C.a', 'A.b S.b', 'C.b S.b')).stars).toBe(3);
+  });
+
+  it('counts a load with L and N swapped as unsafe', () => {
+    const r = powerOn(m, build('S.a K.a', 'K.b A.b', 'K.b C.a', 'A.a S.b', 'C.b S.b'));
+    expect(r.stars).toBe(1);
+    expect(r.tip).toMatch(/stay live/);
+    expect(r.focus).toBe('A');
+  });
+
+  it('holds back the third star for a breaker wired the wrong way round', () => {
+    const r = powerOn(m, build('S.a K.b', 'K.a A.a', 'K.a C.a', 'A.b S.b', 'C.b S.b'));
+    expect(r.stars).toBe(2);
+    expect(r.tip).toMatch(/breaker is the wrong way round/);
+    expect(r.focus).toBe('K');
+  });
 });
 
 describe('Level: one room', () => {
