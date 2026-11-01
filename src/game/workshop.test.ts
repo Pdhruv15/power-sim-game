@@ -79,11 +79,28 @@ describe('Level: single circuit', () => {
 
 describe('Level: one room, L, N, IN and OUT', () => {
   const m = MISSIONS['level-room'];
-  const parts = [part('S', 'supply'), part('K', 'breaker', 20), part('A', 'light'), part('C', 'socket')];
+  const parts = [part('S', 'supply'), part('K', 'breaker', 20), part('A', 'light'), part('C', 'socket'), part('LB', 'lbar'), part('NB', 'nbar')];
   const build = (...list: string[]): Build => ({ parts, wires: wires(2.5, ...list) });
 
-  it('gives 3 stars when every label is followed', () => {
-    expect(powerOn(m, build('S.a K.a', 'K.b A.a', 'K.b C.a', 'A.b S.b', 'C.b S.b')).stars).toBe(3);
+  it('gives 3 stars when every label is followed, with bars sharing the connections', () => {
+    const r = powerOn(m, build('S.a K.a', 'K.b LB.a', 'LB.b A.a', 'LB.d C.a', 'A.b NB.a', 'C.b NB.c', 'NB.b S.b'));
+    expect(r.stars).toBe(3);
+    expect(r.steps[1].amps).toBeCloseTo(16, 0);
+  });
+
+  it('holds back the third star when wires share a connection instead of using a bar', () => {
+    const r = powerOn(m, build('S.a K.a', 'K.b A.a', 'K.b C.a', 'A.b S.b', 'C.b S.b'));
+    expect(r.stars).toBe(2);
+    expect(r.tip).toMatch(/Two wires share one connection/);
+  });
+
+  it('does not need the bars to be placed for a build to work', () => {
+    const r = powerOn(m, { parts: parts.slice(0, 4), wires: wires(2.5, 'S.a K.a', 'K.b A.a', 'K.b C.a', 'A.b S.b', 'C.b S.b') });
+    expect(r.held).toBe(true);
+  });
+
+  it('treats a bar as one piece of metal,so L bar to N bar is a short circuit', () => {
+    expect(powerOn(m, build('S.a LB.a', 'LB.h NB.a', 'NB.b S.b')).tip).toMatch(/short circuit/);
   });
 
   it('counts a load with L and N swapped as unsafe', () => {
@@ -108,9 +125,9 @@ describe('Level: one room', () => {
     wires: wires(mm2, 'G.a K.a', 'K.b L.a', 'K.b P.a', 'L.b G.b', 'P.b G.b', ...extra),
   });
 
-  it('gives 3 stars for a 20 A breaker on 2.5 mm² cable', () => {
+  it('holds on a 20 A breaker on 2.5 mm² cable, and opens it only for the fault', () => {
     const r = powerOn(m, room(20, 2.5));
-    expect(r.stars).toBe(3);
+    expect(r.stars).toBe(2); // two wires share a connection: see the bar tests above
     expect(r.steps.map(s => s.label)).toEqual(['Light on', 'Kettle on', 'Kettle lead shorts']);
     expect(r.steps[1].amps).toBeCloseTo(16, 0);
     expect(r.steps[2].open).toEqual(['K']);
@@ -167,8 +184,8 @@ describe('Level: one room', () => {
 
   it('accepts two breakers with thinner cable for the light', () => {
     const r = powerOn(m, {
-      parts: [part('G', 'supply'), part('K1', 'breaker', 6), part('K2', 'breaker', 20), part('L', 'light'), part('P', 'socket')],
-      wires: wires(2.5, 'G.a K1.a 1.5', 'K1.b L.a 1.5', 'L.b G.b 1.5', 'G.a K2.a', 'K2.b P.a', 'P.b G.b'),
+      parts: [part('G', 'supply'), part('K1', 'breaker', 6), part('K2', 'breaker', 20), part('L', 'light'), part('P', 'socket'), part('LB', 'lbar'), part('NB', 'nbar')],
+      wires: wires(2.5, 'G.a LB.a', 'LB.b K1.a', 'K1.b L.a 1.5', 'L.b NB.a 1.5', 'LB.d K2.a', 'K2.b P.a', 'P.b NB.c', 'NB.b G.b'),
     });
     expect(r.stars).toBe(3);
     expect(r.steps[2].open).toEqual(['K2']);

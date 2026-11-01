@@ -11,6 +11,8 @@ export interface PartBox {
   right: number;
   top: number;
   bottom: number;
+  /** Where its connection points are, when not in the middle of each side. */
+  pads?: readonly Point[];
 }
 
 export interface Point {
@@ -32,6 +34,8 @@ const STUB = 20;
 /** Room a connection point takes up around its centre. */
 const TERM_R = 12;
 const EDGE = 8;
+/** A wire running along a part's edge looks like part of it, so keep at least this far off. */
+const CLEAR = 2;
 /** Runs that sit in the same gap are kept apart by this much. */
 const LANE = 8;
 /** Distances from a part where a wire may run past it. */
@@ -52,6 +56,7 @@ type Segment = readonly [Point, Point];
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const unique = (values: number[]) => [...new Set(values)];
+const onGrid = (v: number) => Math.round(v / 10) * 10;
 
 /** Drops repeated points and points in the middle of a straight run. */
 function tidy(points: readonly Point[]): Point[] {
@@ -95,16 +100,14 @@ export function routeWire(a: WireEnd, b: WireEnd, boardW: number, boardH: number
   const ax = inX(a.x + a.dir * STUB), bx = inX(b.x + b.dir * STUB);
 
   // Another part's connection point counts as part of it, so no wire seems to land on the wrong one
-  const blocks = [...parts, ...parts.flatMap(p => [p.left, p.right].map(x => {
-    const y = (p.top + p.bottom) / 2;
-    return { left: x - TERM_R, right: x + TERM_R, top: y - TERM_R, bottom: y + TERM_R };
-  }))].filter(box => ![a, b].some(e => e.x > box.left && e.x < box.right && e.y > box.top && e.y < box.bottom && box.bottom - box.top === TERM_R * 2));
+  const blocks = [...parts.map(p => ({ ...p, top: p.top - CLEAR, bottom: p.bottom + CLEAR })), ...parts.flatMap(p => (p.pads ?? [p.left, p.right].map(x => ({ x, y: (p.top + p.bottom) / 2 })))
+    .map(({ x, y }) => ({ left: x - TERM_R, right: x + TERM_R, top: y - TERM_R, bottom: y + TERM_R })))].filter(box => ![a, b].some(e => e.x > box.left && e.x < box.right && e.y > box.top && e.y < box.bottom && box.bottom - box.top === TERM_R * 2));
 
-  const columns = unique([ax, bx, (a.x + b.x) / 2, EDGE, boardW - EDGE, ...parts.flatMap(p => PAST_SIDE.flatMap(d => [p.left - d, p.right + d]))]);
+  const columns = unique([ax, bx, onGrid((a.x + b.x) / 2), EDGE, boardW - EDGE, ...parts.flatMap(p => PAST_SIDE.flatMap(d => [p.left - d, p.right + d]))]);
   const near = (d: number) => parts.flatMap(p => [p.top - d, p.bottom + d]);
   // Rows hugging a part are for narrow gaps only
   const tight = new Set(TIGHT_PAST_PART.flatMap(near));
-  const rows = unique([(a.y + b.y) / 2, EDGE, boardH - EDGE, ...PAST_PART.flatMap(near), ...tight])
+  const rows = unique([onGrid((a.y + b.y) / 2), EDGE, boardH - EDGE, ...PAST_PART.flatMap(near), ...tight])
     .filter(y => y >= EDGE && y <= boardH - EDGE);
 
   const routes: Point[][] = [];

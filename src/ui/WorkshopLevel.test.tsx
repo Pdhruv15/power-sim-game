@@ -162,13 +162,15 @@ describe('Level 2: one room', () => {
   beforeEach(() => {
     localStorage.setItem('power-sim:progress:v1', JSON.stringify({ 'level-circuit': { score: 3, stars: 3 } }));
   });
-  const place = () => { click('tray-supply'); click('tray-breaker'); click('tray-light'); click('tray-socket'); };
+  const place = () => { click('tray-supply'); click('tray-breaker'); click('tray-light'); click('tray-socket'); click('tray-lbar'); click('tray-nbar'); };
   const wireRoom = () => {
     wire('supply1-a', 'breaker2-a');
-    wire('breaker2-b', 'light3-a');
-    wire('breaker2-b', 'socket4-a');
-    wire('light3-b', 'supply1-b');
-    wire('socket4-b', 'supply1-b');
+    wire('breaker2-b', 'lbar5-a');
+    wire('lbar5-b', 'light3-a');
+    wire('lbar5-d', 'socket4-a');
+    wire('light3-b', 'nbar6-a');
+    wire('socket4-b', 'nbar6-c');
+    wire('nbar6-b', 'supply1-b');
   };
   const size = (a: string) => fireEvent.change(document.getElementById('size-breaker2')!, { target: { value: a } });
 
@@ -177,7 +179,7 @@ describe('Level 2: one room', () => {
     expect(screen.getByText(/One room · Workshop/)).toBeTruthy();
     place();
     wireRoom();
-    expect(screen.getByText('90 / 110 credits').textContent).toBeTruthy();
+    expect(screen.getByText('120 / 140 credits').textContent).toBeTruthy();
     powerOn(); // the breaker starts at its smallest size
     expect(screen.getByText('It did not hold')).toBeTruthy();
     expect(screen.getByText(/through a 6 A breaker/)).toBeTruthy();
@@ -188,6 +190,8 @@ describe('Level 2: one room', () => {
     const panel = within(document.querySelector<HTMLElement>('.panel.score')!);
     expect(panel.getByLabelText('3 of 3 stars')).toBeTruthy();
     expect(panel.getByText(/the breaker opens at once/)).toBeTruthy();
+    expect(screen.getByText(/That was the fault test/)).toBeTruthy();
+    expect(screen.getByText(/safe trip/)).toBeTruthy();
   });
 
   it('warns about thin cable, and changes a selected wire when a size is picked', () => {
@@ -201,9 +205,9 @@ describe('Level 2: one room', () => {
     expect(screen.getByText(/20 A breaker on 1.5 mm²/)).toBeTruthy();
 
     click('fix-build');
-    expect(screen.getByText('65 / 110 credits')).toBeTruthy();
+    expect(screen.getByText('85 / 140 credits')).toBeTruthy();
     fireEvent.pointerDown(document.querySelector('.wire .wire-hit')!);
     click('cable-2.5');
-    expect(screen.getByText('70 / 110 credits')).toBeTruthy();
+    expect(screen.getByText('90 / 140 credits')).toBeTruthy();
   });
 });

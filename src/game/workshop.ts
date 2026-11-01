@@ -7,7 +7,7 @@ import { fmt } from './format';
  * Nothing runs while they build. Power On tries the build in a few short steps, and the
  * real circuit decides what happens, so any wiring gets an honest result.
  */
-export type PartKind = 'battery' | 'supply' | 'switch' | 'breaker' | 'lamp' | 'light' | 'socket';
+export type PartKind = 'battery' | 'supply' | 'switch' | 'breaker' | 'lamp' | 'light' | 'socket' | 'lbar' | 'nbar';
 
 export interface PlacedPart {
   id: string;
@@ -18,7 +18,7 @@ export interface PlacedPart {
   breakerA?: number;
 }
 
-/** One of a part's two connection points: "<part id>.a" or "<part id>.b". */
+/** One of a part's connection points, such as "<part id>.a". */
 export type Terminal = string;
 
 export interface Wire {
@@ -65,7 +65,14 @@ export const PART_INFO: Readonly<Record<PartKind, { name: string; a: string; b: 
   lamp: { name: 'Lamp', a: 'IN', b: 'OUT', watts: 12 },
   light: { name: 'Room light', a: 'L', b: 'N', watts: 230 },
   socket: { name: 'Socket and kettle', a: 'L', b: 'N', watts: 3450 },
+  lbar: { name: 'L bar', a: '', b: '' },
+  nbar: { name: 'N bar', a: '', b: '' },
 };
+
+/** A bus bar is one solid piece of metal: every point on it is the same point. */
+export const isBar = (k: PartKind) => k === 'lbar' || k === 'nbar';
+export const BAR_POINTS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] as const;
+export const partEnds = (k: PartKind): readonly string[] => (isBar(k) ? BAR_POINTS : ['a', 'b']);
 
 export const MISSIONS: Readonly<Record<string, Mission>> = {
   'level-circuit': {
@@ -79,16 +86,16 @@ export const MISSIONS: Readonly<Record<string, Mission>> = {
   'level-room': {
     id: 'level-room', kind: 'room', title: 'One room',
     goal: 'Power the light and the kettle socket from the street. A faulty kettle must not be able to start a fire.',
-    tray: { supply: 1, breaker: 2, light: 1, socket: 1 }, volts: 230, sourceOhms: 0.03, wireLengthM: 5,
-    cables: [1.5, 2.5], breakers: [6, 10, 16, 20], budget: 110,
-    stars: ['The light and kettle both work', 'Safe in a fault: breaker on L, big enough cable', 'Within budget, breaker under 90 %, IN and OUT the right way, no spare wires'],
+    tray: { supply: 1, breaker: 2, lbar: 1, nbar: 1, light: 1, socket: 1 }, volts: 230, sourceOhms: 0.03, wireLengthM: 5,
+    cables: [1.5, 2.5], breakers: [6, 10, 16, 20], budget: 140,
+    stars: ['The light and kettle both work', 'Safe in a fault: breaker on L, big enough cable', 'Within budget, breaker under 90 %, IN and OUT the right way, one wire on each connection'],
     hint: [
-      'Street L to breaker IN. Breaker OUT to L on the light and on the socket.',
-      'N on the light and on the socket to street N.',
+      'Street L to breaker IN. Breaker OUT to the L bar, then the L bar to L on the light and on the socket.',
+      'N on the light and on the socket to the N bar, then the N bar to street N.',
       'The room needs 16 A at once, so pick a 20 A breaker.',
       'A 20 A breaker needs 2.5 mm² cable on every wire.',
     ],
-    guide: { supply: [1, 3], breaker: [1, 2], light: [2, 3], socket: [2, 3] },
+    guide: { supply: [1, 3], breaker: [1, 2], lbar: [2, 2], nbar: [3, 3], light: [2, 3], socket: [2, 3] },
   },
 };
 
@@ -155,6 +162,10 @@ interface Setup {
 function solve(m: Mission, b: Build, setup: Setup) {
   const parts: Resistor[] = [];
   for (const p of b.parts) {
+    if (isBar(p.kind)) {
+      BAR_POINTS.slice(1).forEach((end, i) => parts.push({ id: `${p.id}:${i}`, a: `${p.id}.${BAR_POINTS[i]}`, b: `${p.id}.${end}`, ohms: CLOSED_OHMS }));
+      continue;
+    }
     if (isSource(p.kind) || setup.off?.includes(p.id) || setup.open?.includes(p.id)) continue;
     const watts = PART_INFO[p.kind].watts;
     const ohms = p.id === setup.shorted ? SHORT_OHMS : watts !== undefined ? m.volts ** 2 / watts : CLOSED_OHMS;
@@ -183,6 +194,7 @@ function joined(b: Build, open: readonly string[] = []) {
   return joinedPoints([
     ...b.wires.map(w => [w.from, w.to] as const),
     ...b.parts.filter(p => (p.kind === 'switch' || p.kind === 'breaker') && !open.includes(p.id)).map(p => [`${p.id}.a`, `${p.id}.b`] as const),
+    ...b.parts.filter(p => isBar(p.kind)).flatMap(p => BAR_POINTS.slice(1).map(end => [`${p.id}.a`, `${p.id}.${end}`] as const)),
   ]);
 }
 
@@ -194,7 +206,7 @@ const report = (steps: TestStep[], stars: 0 | 1 | 2 | 3, tip: string | null, foc
   ({ steps, stars, held: stars >= 1, tip, focus });
 
 const missingTip = (m: Mission, b: Build): string | null => {
-  const missing = (Object.keys(m.tray) as PartKind[]).filter(k => k !== 'breaker' && !b.parts.some(p => p.kind === k));
+  const missing = (Object.keys(m.tray) as PartKind[]).filter(k => k !== 'breaker' && !isBar(k) && !b.parts.some(p => p.kind === k));
   return missing.length ? `Place the ${missing.map(k => PART_INFO[k].name.toLowerCase()).join(' and the ')} first.` : null;
 };
 
@@ -313,6 +325,9 @@ function testRoom(m: Mission, b: Build): PowerOnReport {
   for (const w of b.wires) {
     if (both.wireAmps[w.id] < NO_CURRENT_A) continue;
     const guards = breakers.filter(p => solve(m, b, { open: [p.id] }).wireAmps[w.id] < NO_CURRENT_A);
+    // A wire shared by several breakers, like a bar's feed: together they cut it, so it only has to carry the room
+    const shared = guards.length === 0 && solve(m, b, { open: breakers.map(p => p.id) }).wireAmps[w.id] < NO_CURRENT_A;
+    if (shared && both.wireAmps[w.id] <= cableAmps(w.mm2)) continue;
     const guard = guards.length ? Math.min(...guards.map(p => p.breakerA ?? 0)) : Infinity;
     if (guard > cableAmps(w.mm2)) {
       return unsafe(`The breaker lets ${guard === Infinity ? 'any current' : `${guard} A`} through a wire good for ${cableAmps(w.mm2)} A.`,
@@ -332,6 +347,9 @@ function testRoom(m: Mission, b: Build): PowerOnReport {
   if (spare) return report(steps, 2, 'One wire carries no current. Remove it for the third star.', spare.id);
   const backwards = backwardsPart(dead, breakers, L);
   if (backwards) return report(steps, 2, `The ${backwards.breakerA} A breaker is the wrong way round. Bring the street to IN and take the room from OUT.`, backwards.id);
+  // Real terminals take one wire. Sharing a connection is what a bus bar is for.
+  const crowded = b.parts.find(p => !isBar(p.kind) && partEnds(p.kind).some(end => b.wires.filter(w => w.from === `${p.id}.${end}` || w.to === `${p.id}.${end}`).length > 1));
+  if (crowded) return report(steps, 2, `Two wires share one connection on the ${PART_INFO[crowded.kind].name.toLowerCase()}. Run them from the L bar or the N bar instead.`, crowded.id);
   return report(steps, 3, null);
 }
 
