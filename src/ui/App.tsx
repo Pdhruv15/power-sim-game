@@ -6,13 +6,14 @@ import { CircuitList } from './CircuitList';
 import { DesignPanel } from './DesignPanel';
 import { EventLog } from './EventLog';
 import { Kpis } from './Kpis';
-import { LEVELS, type LevelEntry } from './levels';
+import { LEVELS, WORLD_MAP, type LevelEntry } from './levels';
 import { isUnlocked, loadProgress, saveResult, type Best } from './progress';
 import { ScorePanel } from './ScorePanel';
 import { Stage } from './Stage';
 import { TimeControls } from './TimeControls';
 import { useAnimationClock } from './useAnimationClock';
 import { ViewBar } from './ViewBar';
+import { WorkshopLevel } from './WorkshopLevel';
 
 const START_HOUR = 12;
 /** Simulated hours per real second: free exploring, and the scored day replay (24 h in 12 s). */
@@ -22,15 +23,17 @@ const RUN_SPEED = 2;
 /** Level picker plus the current level. */
 export function App() {
   const [progress, setProgress] = useState<Record<string, Best>>(loadProgress);
-  const [entry, setEntry] = useState<LevelEntry>(LEVELS[0]);
+  // Start on the first level still to win
+  const [entry, setEntry] = useState<LevelEntry>(() => LEVELS.find(l => !progress[l.id]?.stars) ?? LEVELS[LEVELS.length - 1]);
   // The loaded level, tagged with the entry it belongs to so a level switch never shows the old one
   const [loaded, setLoaded] = useState<{ id: string; level: Level } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
-    const url = `${import.meta.env.BASE_URL}${entry.file}`;
     setError(null);
+    if (!entry.file) return; // workshop level: nothing to load
+    const url = `${import.meta.env.BASE_URL}${entry.file}`;
     fetch(url)
       .then(res => {
         if (!res.ok) throw new Error(`Could not load ${url} (HTTP ${res.status}).`);
@@ -61,6 +64,24 @@ export function App() {
     </nav>
   );
 
+  if (!entry.file) {
+    const next = LEVELS[LEVELS.indexOf(entry) + 1];
+    const map = (
+      <ol className="world-map" aria-label="Your world">
+        {WORLD_MAP.map(step => {
+          const stars = step.level ? progress[step.level]?.stars ?? 0 : 0;
+          return <li key={step.name} className={stars > 0 ? 'lit' : undefined}><i />{step.name}</li>;
+        })}
+      </ol>
+    );
+    return (
+      <WorkshopLevel
+        key={entry.id} entry={entry} picker={picker} map={map} best={progress[entry.id]}
+        onResult={stars => setProgress(saveResult(entry.id, { score: stars, stars }))}
+        onNext={next ? () => setEntry(next) : null}
+      />
+    );
+  }
   if (error) return <main className="app">{picker}<pre className="error">{error}</pre></main>;
   if (!loaded || loaded.id !== entry.id) return <main className="app">{picker}<p className="muted">Loading level…</p></main>;
   return (
