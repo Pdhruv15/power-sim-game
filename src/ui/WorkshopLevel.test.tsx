@@ -162,34 +162,51 @@ describe('Level 2: one room', () => {
   beforeEach(() => {
     localStorage.setItem('power-sim:progress:v1', JSON.stringify({ 'level-circuit': { score: 3, stars: 3 } }));
   });
-  const place = () => { click('tray-supply'); click('tray-breaker'); click('tray-light'); click('tray-socket'); click('tray-lbar'); click('tray-nbar'); };
-  const wireRoom = () => {
-    wire('supply1-a', 'breaker2-a');
-    wire('breaker2-b', 'lbar5-a');
-    wire('lbar5-b', 'light3-a');
-    wire('lbar5-d', 'socket4-a');
-    wire('light3-b', 'nbar6-a');
-    wire('socket4-b', 'nbar6-c');
-    wire('nbar6-b', 'supply1-b');
+  const place = () => { click('tray-light'); click('tray-socket'); };
+  const wireLoad = (load: string, mcb: string) => {
+    wire(`${mcb}-b`, `${load}-a`);
+    wire('nbar-b', `${load}-b`);
+    wire('ebar-b', `${load}-c`);
   };
-  const size = (a: string) => fireEvent.change(document.getElementById('size-breaker2')!, { target: { value: a } });
+  const size = (id: string, a: string) => fireEvent.change(document.getElementById(`size-${id}`)!, { target: { value: a } });
+  const stars = (n: number) => within(document.querySelector<HTMLElement>('.panel.score')!).getByLabelText(`${n} of 3 stars`);
 
-  it('trips a breaker that is too small, then earns 3 stars once fixed', () => {
+  it('starts with the distribution board ready, and only the loads to place', () => {
     render(<App />);
-    expect(screen.getByText(/One room · Workshop/)).toBeTruthy();
+    expect(document.querySelector('.db-box')).toBeTruthy();
+    expect(document.querySelectorAll('.wire.fixed').length).toBeGreaterThan(0);
+    for (const id of ['part-main', 'part-lbar', 'part-nbar', 'part-ebar', 'part-mcb1', 'part-mcb2', 'part-street']) expect(document.getElementById(id)).toBeTruthy();
+    expect(document.querySelectorAll('.tray-item')).toHaveLength(2);
+  });
+
+  it('keeps the board in place when the player clears or tries to move it', () => {
+    render(<App />);
     place();
-    wireRoom();
-    expect(screen.getByText('120 / 140 credits').textContent).toBeTruthy();
-    powerOn(); // the breaker starts at its smallest size
+    const before = document.getElementById('part-mcb1')!.style.left;
+    fireEvent.keyDown(document.getElementById('part-mcb1')!, { key: 'ArrowRight' });
+    expect(document.getElementById('part-mcb1')!.style.left).toBe(before);
+    fireEvent.click(screen.getByRole('button', { name: 'Clear board' }));
+    expect(document.getElementById('part-mcb1')).toBeTruthy();
+    expect(document.getElementById('part-light1')).toBeNull();
+  });
+
+  it('trips a breaker that is too small, then earns 3 stars once fixed, and explains the fault test', () => {
+    render(<App />);
+    place();
+    click('cable-1.5');
+    wireLoad('light1', 'mcb2');
+    click('cable-2.5');
+    wireLoad('socket2', 'mcb1');
+    expect(screen.getByText('105 / 110 credits')).toBeTruthy();
+    powerOn(); // the breakers start at their smallest size
     expect(screen.getByText('It did not hold')).toBeTruthy();
     expect(screen.getByText(/through a 6 A breaker/)).toBeTruthy();
 
     click('fix-build');
-    size('20');
+    size('mcb1', '20');
     powerOn();
-    const panel = within(document.querySelector<HTMLElement>('.panel.score')!);
-    expect(panel.getByLabelText('3 of 3 stars')).toBeTruthy();
-    expect(panel.getByText(/the breaker opens at once/)).toBeTruthy();
+    expect(stars(3)).toBeTruthy();
+    expect(screen.getByText(/the breaker opens at once/)).toBeTruthy();
     expect(screen.getByText(/That was the fault test/)).toBeTruthy();
     expect(screen.getByText(/safe trip/)).toBeTruthy();
   });
@@ -197,17 +214,27 @@ describe('Level 2: one room', () => {
   it('warns about thin cable, and changes a selected wire when a size is picked', () => {
     render(<App />);
     place();
-    size('20');
+    size('mcb1', '20');
     click('cable-1.5');
-    wireRoom();
+    wireLoad('light1', 'mcb2');
+    wireLoad('socket2', 'mcb1');
     powerOn();
-    expect(within(document.querySelector<HTMLElement>('.panel.score')!).getByLabelText('1 of 3 stars')).toBeTruthy();
+    expect(stars(1)).toBeTruthy();
     expect(screen.getByText(/20 A breaker on 1.5 mm²/)).toBeTruthy();
 
     click('fix-build');
-    expect(screen.getByText('85 / 140 credits')).toBeTruthy();
-    fireEvent.pointerDown(document.querySelector('.wire .wire-hit')!);
+    expect(screen.getByText('90 / 110 credits')).toBeTruthy();
+    fireEvent.pointerDown(document.querySelector('.wire:not(.fixed) .wire-hit')!);
     click('cable-2.5');
-    expect(screen.getByText('90 / 140 credits')).toBeTruthy();
+    expect(screen.getByText('95 / 110 credits')).toBeTruthy();
+  });
+
+  it('colours wires by conductor', () => {
+    render(<App />);
+    place();
+    wireLoad('light1', 'mcb2');
+    expect(document.querySelectorAll('.wire.cond-L').length).toBeGreaterThan(0);
+    expect(document.querySelectorAll('.wire.cond-N').length).toBeGreaterThan(0);
+    expect(document.querySelectorAll('.wire.cond-E').length).toBeGreaterThan(0);
   });
 });

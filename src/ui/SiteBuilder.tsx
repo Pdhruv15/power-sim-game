@@ -7,7 +7,7 @@ import { fmt, hhmm } from './format';
 import { PartIcon, roomIcon, TERM_TITLES } from './PartIcon';
 import { trackDrag } from './trackDrag';
 import { TERMINAL_ATTR, useWireDrag } from './useWireDrag';
-import { draftPath, pathOf, routeWires, type Point, type WireEnd } from './wireRoute';
+import { draftPath, drawWires, routeWires, type WireEnd } from './wireRoute';
 
 const BOARD_W = 860;
 const STREET = { x: 16, w: 100, h: 92 };
@@ -178,7 +178,7 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
         return [{ id: roomIn(c.id), from: boardOut(c.board), to: roomIn(c.id), a: outAt(c.board), b: { x: at.x, y: at.y + ROOM_H / 2, dir: -1 as const } }];
       }),
     ];
-    return routeWires(jobs, BOARD_W, boardH, boxes);
+    return drawWires(jobs, routeWires(jobs, BOARD_W, boardH, boxes));
     // Everything else here follows from the level, which fixes the board's size and the rooms
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [level, build, spots]);
@@ -221,18 +221,19 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
           >
             <svg className="wires" width={BOARD_W} height={boardH} aria-hidden={wired === 0 && !build.supplyWired}>
               {build.supplyWired && (
-                <SiteWire id={STREET_OUT} label={`Street to ${top.name}`} points={routes.get(STREET_OUT)!} mm2={16} selected={selected === STREET_OUT} onSelect={setSelected} />
+                <SiteWire id={STREET_OUT} label={`Street to ${top.name}`} d={routes.paths.get(STREET_OUT)!} mm2={16} selected={selected === STREET_OUT} onSelect={setSelected} />
               )}
               {below.map(b => {
                 const mm2 = build.boards[b.id].mm2;
                 if (mm2 == null) return null;
-                return <SiteWire key={b.id} id={feederWire(b.id)} label={`${b.name} feeder, ${mm2} mm²`} points={routes.get(feederWire(b.id))!} mm2={mm2} selected={selected === feederWire(b.id)} onSelect={setSelected} />;
+                return <SiteWire key={b.id} id={feederWire(b.id)} label={`${b.name} feeder, ${mm2} mm²`} d={routes.paths.get(feederWire(b.id))!} mm2={mm2} selected={selected === feederWire(b.id)} onSelect={setSelected} />;
               })}
               {level.circuits.map(c => {
                 const mm2 = build.rooms[c.id].mm2;
                 if (mm2 == null) return null;
-                return <SiteWire key={c.id} id={roomIn(c.id)} label={`${c.room} cable, ${mm2} mm²`} points={routes.get(roomIn(c.id))!} mm2={mm2} selected={selected === roomIn(c.id)} onSelect={setSelected} />;
+                return <SiteWire key={c.id} id={roomIn(c.id)} label={`${c.room} cable, ${mm2} mm²`} d={routes.paths.get(roomIn(c.id))!} mm2={mm2} selected={selected === roomIn(c.id)} onSelect={setSelected} />;
               })}
+              {routes.dots.map(p => <circle key={`${p.x},${p.y}`} className="wire-dot" cx={p.x} cy={p.y} r={3.5} />)}
               {wireDraft && <path className="wire-preview" d={draftPath(wireDraft)} />}
             </svg>
 
@@ -356,10 +357,9 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
   );
 }
 
-function SiteWire({ id, label, points, mm2, selected, onSelect }: {
-  id: string; label: string; points: readonly Point[]; mm2: number; selected: boolean; onSelect: (id: string) => void;
+function SiteWire({ id, label, d, mm2, selected, onSelect }: {
+  id: string; label: string; d: string; mm2: number; selected: boolean; onSelect: (id: string) => void;
 }) {
-  const d = pathOf(points);
   return (
     <g className={`wire${selected ? ' sel' : ''}`}>
       <path

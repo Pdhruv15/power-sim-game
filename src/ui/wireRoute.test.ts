@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { draftPath, labelSpot, pathOf, routeWire, routeWires, type PartBox, type Point, type WireEnd } from './wireRoute';
+import { draftPath, drawWires, hoppedPath, labelSpot, pathOf, routeWire, routeWires, type PartBox, type Point, type WireEnd } from './wireRoute';
 
 const W = 860, H = 440;
 
@@ -103,5 +103,57 @@ describe('drawing a route', () => {
 
   it('draws the wire being dragged with right angles too', () => {
     expect(draftPath({ x1: 0, y1: 0, x2: 100, y2: 40 })).toBe('M0 0 H50 V40 H100');
+  });
+});
+
+describe('jumpers and joints', () => {
+  const across = [{ x: 0, y: 50 }, { x: 100, y: 50 }];
+  const upright = [[{ x: 50, y: 0 }, { x: 50, y: 100 }]] as const;
+
+  it('hops over a crossing wire', () => {
+    expect(hoppedPath(across, upright)).toBe('M0 50 L44 50 A6 6 0 0 1 56 50 L100 50');
+  });
+
+  it('hops upward whichever way the wire runs', () => {
+    expect(hoppedPath([...across].reverse(), upright)).toBe('M100 50 L56 50 A6 6 0 0 0 44 50 L0 50');
+  });
+
+  it('does not hop over a wire that stops short of it', () => {
+    expect(hoppedPath(across, [[{ x: 50, y: 0 }, { x: 50, y: 40 }]])).toBe('M0 50 L100 50');
+  });
+
+  const job = (id: string, from: string, to: string, ax: number, ay: number, bx: number, by: number) => ({
+    id, from, to, a: { x: ax, y: ay, dir: 1 as const }, b: { x: bx, y: by, dir: -1 as const },
+  });
+
+  it('draws a hop, and no dot, where unrelated wires cross', () => {
+    const jobs = [job('w1', 'a', 'b', 0, 50, 100, 50), job('w2', 'c', 'd', 50, 0, 50, 100)];
+    const routes = new Map<string, Point[]>([['w1', [{ x: 0, y: 50 }, { x: 100, y: 50 }]], ['w2', [{ x: 50, y: 0 }, { x: 50, y: 100 }]]]);
+    const { paths, dots } = drawWires(jobs, routes);
+    expect(paths.get('w1')).toContain('A6 6');
+    expect(paths.get('w2')).not.toContain('A6 6');
+    expect(dots).toEqual([]);
+  });
+
+  it('draws a dot, and no hop, where joined wires split', () => {
+    const jobs = [job('w1', 'a', 'b', 0, 50, 100, 50), job('w2', 'a', 'c', 0, 50, 50, 100)];
+    const routes = new Map<string, Point[]>([['w1', [{ x: 0, y: 50 }, { x: 100, y: 50 }]], ['w2', [{ x: 0, y: 50 }, { x: 50, y: 50 }, { x: 50, y: 100 }]]]);
+    const { paths, dots } = drawWires(jobs, routes);
+    expect(dots).toEqual([{ x: 50, y: 50 }]);
+    expect(paths.get('w1')).not.toContain('A6 6');
+  });
+});
+
+describe('ends on the top or bottom of a part', () => {
+  it('runs straight between two facing ends', () => {
+    const points = routeWire({ x: 50, y: 10, dir: 1, vert: true }, { x: 50, y: 40, dir: -1, vert: true }, W, H);
+    expect(points).toHaveLength(2);
+  });
+
+  it('drops straight out of the part before turning', () => {
+    const points = routeWire({ x: 380, y: 200, dir: 1, vert: true }, { x: 640, y: 260, dir: -1 }, W, H);
+    expect(points[1].x).toBe(380);
+    expect(points[1].y).toBeGreaterThan(200);
+    expect(allSquare(points)).toBe(true);
   });
 });

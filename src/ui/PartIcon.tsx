@@ -36,6 +36,7 @@ export const TERM_TITLES: Readonly<Record<string, string>> = {
   OUT: 'Power goes out here',
   L: 'Live: the side power comes from',
   N: 'Neutral: the way back',
+  E: 'Earth: carries current only in a fault',
   '+': 'Battery plus: current leaves here',
   '−': 'Battery minus: current comes back here',
 };

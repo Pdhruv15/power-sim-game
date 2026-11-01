@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { parseLevel, type Level, type Phase } from '../sim';
 import { runDay } from './runDay';
 import { scoreDay } from './score';
-import { buildCost, coinsEarned, MISSIONS, newSiteBuild, powerOn, siteDesign, type Build, type PartKind, type PlacedPart, type SiteBuild } from './workshop';
+import { buildCost, coinsEarned, MISSIONS, newSiteBuild, powerOn, siteDesign, wireConductor, type Build, type PartKind, type PlacedPart, type SiteBuild } from './workshop';
 
 const part = (id: string, kind: PartKind, breakerA?: number): PlacedPart => ({ id, kind, x: 0, y: 0, ...(breakerA && { breakerA }) });
 /** Wires as "from to" or "from to mm2". */
@@ -77,139 +77,109 @@ describe('Level: single circuit', () => {
   });
 });
 
-describe('Level: one room, L, N, IN and OUT', () => {
+describe('Level: one room, from a distribution board', () => {
   const m = MISSIONS['level-room'];
-  const parts = [part('S', 'supply'), part('K', 'breaker', 20), part('A', 'light'), part('C', 'socket'), part('LB', 'lbar'), part('NB', 'nbar')];
-  const build = (...list: string[]): Build => ({ parts, wires: wires(2.5, ...list) });
+  const LIGHT = ['mcb2.b A.a 1.5', 'nbar.b A.b 1.5', 'ebar.b A.c 1.5'];
+  const SOCKET = ['mcb1.b C.a', 'nbar.b C.b', 'ebar.b C.c'];
+  const room = (socketA: number, lightA: number, ...list: string[]): Build => ({
+    parts: [
+      ...m.start.parts.map(p => (p.id === 'mcb1' ? { ...p, breakerA: socketA } : p.id === 'mcb2' ? { ...p, breakerA: lightA } : p)),
+      part('A', 'light'), part('C', 'socket'),
+    ],
+    wires: [...m.start.wires, ...wires(2.5, ...list)],
+  });
 
-  it('gives 3 stars when every label is followed, with bars sharing the connections', () => {
-    const r = powerOn(m, build('S.a K.a', 'K.b LB.a', 'LB.b A.a', 'LB.d C.a', 'A.b NB.a', 'C.b NB.c', 'NB.b S.b'));
+  it('gives 3 stars for a breaker each, thinner cable on the light, and both loads earthed', () => {
+    const b = room(20, 6, ...LIGHT, ...SOCKET);
+    const r = powerOn(m, b);
     expect(r.stars).toBe(3);
-    expect(r.steps[1].amps).toBeCloseTo(16, 0);
-  });
-
-  it('holds back the third star when wires share a connection instead of using a bar', () => {
-    const r = powerOn(m, build('S.a K.a', 'K.b A.a', 'K.b C.a', 'A.b S.b', 'C.b S.b'));
-    expect(r.stars).toBe(2);
-    expect(r.tip).toMatch(/Two wires share one connection/);
-  });
-
-  it('does not need the bars to be placed for a build to work', () => {
-    const r = powerOn(m, { parts: parts.slice(0, 4), wires: wires(2.5, 'S.a K.a', 'K.b A.a', 'K.b C.a', 'A.b S.b', 'C.b S.b') });
-    expect(r.held).toBe(true);
-  });
-
-  it('treats a bar as one piece of metal,so L bar to N bar is a short circuit', () => {
-    expect(powerOn(m, build('S.a LB.a', 'LB.h NB.a', 'NB.b S.b')).tip).toMatch(/short circuit/);
-  });
-
-  it('counts a load with L and N swapped as unsafe', () => {
-    const r = powerOn(m, build('S.a K.a', 'K.b A.b', 'K.b C.a', 'A.a S.b', 'C.b S.b'));
-    expect(r.stars).toBe(1);
-    expect(r.tip).toMatch(/stay live/);
-    expect(r.focus).toBe('A');
-  });
-
-  it('holds back the third star for a breaker wired the wrong way round', () => {
-    const r = powerOn(m, build('S.a K.b', 'K.a A.a', 'K.a C.a', 'A.b S.b', 'C.b S.b'));
-    expect(r.stars).toBe(2);
-    expect(r.tip).toMatch(/breaker is the wrong way round/);
-    expect(r.focus).toBe('K');
-  });
-});
-
-describe('Level: one room', () => {
-  const m = MISSIONS['level-room'];
-  const room = (breakerA: number, mm2: number, ...extra: string[]): Build => ({
-    parts: [part('G', 'supply'), part('K', 'breaker', breakerA), part('L', 'light'), part('P', 'socket')],
-    wires: wires(mm2, 'G.a K.a', 'K.b L.a', 'K.b P.a', 'L.b G.b', 'P.b G.b', ...extra),
-  });
-
-  it('holds on a 20 A breaker on 2.5 mm² cable, and opens it only for the fault', () => {
-    const r = powerOn(m, room(20, 2.5));
-    expect(r.stars).toBe(2); // two wires share a connection: see the bar tests above
+    expect(r.tip).toBeNull();
     expect(r.steps.map(s => s.label)).toEqual(['Light on', 'Kettle on', 'Kettle lead shorts']);
     expect(r.steps[1].amps).toBeCloseTo(16, 0);
-    expect(r.steps[2].open).toEqual(['K']);
-    expect(r.steps[2].lit).toEqual([]); // the room's one breaker opened
-    expect(buildCost(m, room(20, 2.5))).toBe(90);
+    expect(buildCost(m, b)).toBe(105);
+  });
+
+  it('opens only the faulty circuit, so the light stays on', () => {
+    const r = powerOn(m, room(20, 6, ...LIGHT, ...SOCKET));
+    expect(r.steps[2].open).toEqual(['mcb1']);
+    expect(r.steps[2].lit).toEqual(['A']);
+  });
+
+  it('does not charge for what comes with the board', () => {
+    expect(buildCost(m, m.start)).toBe(30); // the two breakers
   });
 
   it('trips an undersized breaker when the kettle goes on', () => {
-    const r = powerOn(m, room(10, 2.5));
+    const r = powerOn(m, room(10, 6, ...LIGHT, ...SOCKET));
     expect(r.stars).toBe(0);
-    expect(r.steps[1].open).toEqual(['K']);
+    expect(r.steps[1].open).toEqual(['mcb1']);
     expect(r.tip).toMatch(/through a 10 A breaker/);
   });
 
-  it('lets a breaker at exactly the load hold, but keeps the third star back', () => {
-    const r = powerOn(m, room(16, 2.5));
+  it('lets a breaker close to its load hold, but keeps the third star back', () => {
+    const r = powerOn(m, room(16, 6, ...LIGHT, ...SOCKET));
     expect(r.stars).toBe(2);
     expect(r.tip).toMatch(/Keep normal peaks under 90 %/);
   });
 
   it('calls a breaker bigger than its cable unsafe', () => {
-    const r = powerOn(m, room(20, 1.5));
+    const r = powerOn(m, room(20, 6, ...LIGHT, 'mcb1.b C.a 1.5', 'nbar.b C.b 1.5', 'ebar.b C.c 1.5'));
     expect(r.stars).toBe(1);
     expect(r.tip).toMatch(/20 A breaker on 1.5 mm²/);
   });
 
-  it('calls a room with no breaker unsafe, though everything works', () => {
-    const r = powerOn(m, {
-      parts: [part('G', 'supply'), part('L', 'light'), part('P', 'socket')],
-      wires: wires(2.5, 'G.a L.a', 'G.a P.a', 'L.b G.b', 'P.b G.b'),
-    });
+  it('counts a load with no earth as unsafe, though it works', () => {
+    const r = powerOn(m, room(20, 6, ...LIGHT, 'mcb1.b C.a', 'nbar.b C.b'));
     expect(r.stars).toBe(1);
-    expect(r.steps[2].ok).toBe(false);
-    expect(r.tip).toMatch(/Put a breaker between L and the socket/);
+    expect(r.tip).toMatch(/Connect E on the socket and kettle to the E bar/);
+    expect(r.focus).toBe('C');
   });
 
-  it('catches a breaker on the neutral side: it cuts the current but leaves the room live', () => {
-    const r = powerOn(m, {
-      parts: [part('G', 'supply'), part('K', 'breaker', 20), part('L', 'light'), part('P', 'socket')],
-      wires: wires(2.5, 'G.a L.a', 'G.a P.a', 'L.b K.a', 'P.b K.a', 'K.b G.b'),
-    });
-    expect(r.stars).toBe(1);
-    expect(r.tip).toMatch(/Put breakers on the L side/);
+  it('refuses earth joined to live or neutral', () => {
+    expect(powerOn(m, room(20, 6, ...LIGHT, ...SOCKET, 'mcb1.b ebar.b')).tip).toMatch(/Earth is joined to L or N/);
+    expect(powerOn(m, room(20, 6, ...LIGHT, ...SOCKET, 'nbar.b ebar.b')).stars).toBe(0);
+    expect(powerOn(m, room(20, 6, ...LIGHT, 'mcb1.b C.a', 'nbar.b C.b', 'mcb1.b C.c')).stars).toBe(0);
   });
 
-  it('catches a light with no protection beside a protected socket', () => {
-    const r = powerOn(m, {
-      parts: [part('G', 'supply'), part('K', 'breaker', 20), part('L', 'light'), part('P', 'socket')],
-      wires: wires(2.5, 'G.a K.a', 'K.b P.a', 'P.b G.b', 'G.a L.a', 'L.b G.b'),
-    });
+  it('counts a load with L and N swapped as unsafe', () => {
+    const r = powerOn(m, room(20, 6, 'mcb2.b A.b 1.5', 'nbar.b A.a 1.5', 'ebar.b A.c 1.5', ...SOCKET));
+    expect(r.stars).toBe(1);
+    expect(r.tip).toMatch(/stay live/);
+    expect(r.focus).toBe('A');
+  });
+
+  it('holds back the third star when two loads share a breaker', () => {
+    const r = powerOn({ ...m, budget: 200 }, room(20, 6, 'mcb1.b A.a', 'nbar.b A.b', 'ebar.b A.c', ...SOCKET));
+    expect(r.stars).toBe(2);
+    expect(r.tip).toMatch(/Two wires share one connection/);
+  });
+
+  it('catches a load wired straight to the L bar, past its breaker', () => {
+    const r = powerOn(m, room(20, 6, 'lbar.a A.a 1.5', 'nbar.b A.b 1.5', 'ebar.b A.c 1.5', ...SOCKET));
     expect(r.stars).toBe(1);
     expect(r.tip).toMatch(/Room light stays live/);
   });
 
-  it('accepts two breakers with thinner cable for the light', () => {
-    const r = powerOn(m, {
-      parts: [part('G', 'supply'), part('K1', 'breaker', 6), part('K2', 'breaker', 20), part('L', 'light'), part('P', 'socket'), part('LB', 'lbar'), part('NB', 'nbar')],
-      wires: wires(2.5, 'G.a LB.a', 'LB.b K1.a', 'K1.b L.a 1.5', 'L.b NB.a 1.5', 'LB.d K2.a', 'K2.b P.a', 'P.b NB.c', 'NB.b G.b'),
-    });
-    expect(r.stars).toBe(3);
-    expect(r.steps[2].open).toEqual(['K2']);
-    expect(r.steps[2].lit).toEqual(['L']); // only the faulty circuit goes off
-  });
-
   it('notices loads wired in a line', () => {
-    const r = powerOn(m, {
-      parts: [part('G', 'supply'), part('K', 'breaker', 20), part('L', 'light'), part('P', 'socket')],
-      wires: wires(2.5, 'G.a K.a', 'K.b L.a', 'L.b P.a', 'P.b G.b'),
-    });
+    const r = powerOn(m, room(20, 6, 'mcb1.b A.a', 'A.b C.a', 'nbar.b C.b', 'ebar.b A.c', 'ebar.b C.c'));
     expect(r.stars).toBe(0);
     expect(r.tip).toMatch(/side by side/);
   });
 
-  it('catches L touching N', () => {
-    expect(powerOn(m, room(20, 2.5, 'G.a G.b')).tip).toMatch(/short circuit/);
+  it('treats a bar as one piece of metal, so L to the N bar is a short circuit', () => {
+    expect(powerOn(m, room(20, 6, ...LIGHT, ...SOCKET, 'mcb1.b nbar.b')).tip).toMatch(/short circuit/);
   });
 
   it('keeps the third star back when over budget', () => {
-    const m2 = { ...m, budget: 80 };
-    const r = powerOn(m2, room(20, 2.5));
+    const r = powerOn(m, room(20, 6, 'mcb2.b A.a', 'nbar.b A.b', 'ebar.b A.c', ...SOCKET));
     expect(r.stars).toBe(2);
-    expect(r.tip).toMatch(/90 credits against a budget of 80/);
+    expect(r.tip).toMatch(/120 credits against a budget of 110/);
+  });
+
+  it('says which conductor each wire belongs to', () => {
+    const b = room(20, 6, ...LIGHT, ...SOCKET);
+    const of = (from: string) => wireConductor(b, b.wires.find(w => w.from === from)!);
+    expect([of('mcb2.b'), of('nbar.b'), of('ebar.b')]).toEqual(['L', 'N', 'E']);
   });
 });
 
