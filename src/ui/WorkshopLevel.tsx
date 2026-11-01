@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildCost, coinsEarned, HINT_PRICE, MISSIONS, PART_INFO, powerOn, SHOP_ITEMS, STARTING_COINS,
   type Build, type PartKind, type PlacedPart, type PowerOnReport, type Terminal, type Wire,
@@ -6,15 +6,21 @@ import {
 import { cableAmps } from '../sim';
 import { fmt } from './format';
 import type { LevelEntry } from './levels';
+import { PartIcon, TERM_TITLES, type IconName } from './PartIcon';
 import { loadWallet, saveWallet, type Best, type Wallet } from './progress';
 import { trackDrag } from './trackDrag';
 import { TERMINAL_ATTR, useWireDrag } from './useWireDrag';
-import { wirePath, type WireEnd } from './wireRoute';
+import { draftPath, labelSpot, pathOf, routeWires, type Point, type WireEnd } from './wireRoute';
 
 const BOARD_W = 860, BOARD_H = 440;
-const PART_W = 136, PART_H = 76;
+const PART_W = 136, PART_H = 92;
+/** Parts keep this far from the sides, so a wire can always leave them. */
+const SIDE_ROOM = 24;
 const NUDGE = 10;
 const STEP_MS = 1500;
+const PART_ICONS: Readonly<Record<PartKind, IconName>> = {
+  battery: 'battery', supply: 'supply', switch: 'switch', breaker: 'breaker', lamp: 'bulb', light: 'bulb', socket: 'socket',
+};
 /** Where a part goes when it is added with a click instead of dragged. */
 const SLOTS = [[30, 40], [362, 40], [694, 40], [30, 320], [362, 320], [694, 320], [362, 180], [30, 180], [694, 180]] as const;
 
@@ -62,7 +68,7 @@ export function WorkshopLevel({ entry, picker, map, best, onResult, onNext }: Pr
       const free = SLOTS.find(([sx, sy]) => !b.parts.some(p => Math.abs(p.x - sx) < PART_W && Math.abs(p.y - sy) < PART_H)) ?? SLOTS[0];
       const part: PlacedPart = {
         id, kind,
-        x: clamp(x ?? free[0], 0, BOARD_W - PART_W), y: clamp(y ?? free[1], 0, BOARD_H - PART_H),
+        x: clamp(x ?? free[0], SIDE_ROOM, BOARD_W - PART_W - SIDE_ROOM), y: clamp(y ?? free[1], 0, BOARD_H - PART_H),
         ...(kind === 'breaker' && { breakerA: mission.breakers[0] }),
       };
       return { ...b, parts: [...b.parts, part] };
@@ -139,7 +145,7 @@ export function WorkshopLevel({ entry, picker, map, best, onResult, onNext }: Pr
   };
 
   const movePart = (id: string, x: number, y: number) =>
-    setBuild(b => ({ ...b, parts: b.parts.map(p => (p.id === id ? { ...p, x: clamp(x, 0, BOARD_W - PART_W), y: clamp(y, 0, BOARD_H - PART_H) } : p)) }));
+    setBuild(b => ({ ...b, parts: b.parts.map(p => (p.id === id ? { ...p, x: clamp(x, SIDE_ROOM, BOARD_W - PART_W - SIDE_ROOM), y: clamp(y, 0, BOARD_H - PART_H) } : p)) }));
 
   const startMovePart = (e: React.PointerEvent, p: PlacedPart) => {
     if (locked) return;
@@ -174,6 +180,16 @@ export function WorkshopLevel({ entry, picker, map, best, onResult, onNext }: Pr
   const hintId = `hint:${mission.id}`;
   const hasHint = wallet.owned.includes(hintId);
   const buy = (id: string, price: number) => changeWallet({ coins: wallet.coins - price, owned: [...wallet.owned, id] });
+  // The first level teaches wiring with the numbers on show; after that they are part of the bought hint
+  const showGuide = mission.kind === 'circuit' || hasHint;
+  const routes = useMemo(() => {
+    const boxes = build.parts.map(p => ({ left: p.x, right: p.x + PART_W, top: p.y, bottom: p.y + PART_H }));
+    const jobs = build.wires.flatMap(w => {
+      const a = terminalAt(build.parts, w.from), b = terminalAt(build.parts, w.to);
+      return a && b ? [{ id: w.id, from: w.from, to: w.to, a, b }] : [];
+    });
+    return routeWires(jobs, BOARD_W, BOARD_H, boxes);
+  }, [build.parts, build.wires]);
 
   const cost = buildCost(mission, build);
   const overBudget = mission.budget !== null && cost > mission.budget;
@@ -204,7 +220,7 @@ export function WorkshopLevel({ entry, picker, map, best, onResult, onNext }: Pr
                     onPointerDown={e => startDragFromTray(e, kind)}
                     onClick={() => { if (!dragged.current) addPart(kind); dragged.current = false; }}
                   >
-                    <b>{PART_INFO[kind].name}</b> <small>{left} left</small>
+                    <PartIcon name={PART_ICONS[kind]} size={18} /> <b>{PART_INFO[kind].name}</b> <small>{left} left</small>
                   </button>
                 );
               })}
@@ -228,14 +244,17 @@ export function WorkshopLevel({ entry, picker, map, best, onResult, onNext }: Pr
               onPointerDown={e => { if (e.target === e.currentTarget) { setSelected(null); setPending(null); } }}
             >
               <svg className="wires over" width={BOARD_W} height={BOARD_H} aria-hidden={build.wires.length === 0}>
-                {build.wires.map(w => (
-                  <WirePath key={w.id} wire={w} parts={build.parts} amps={lastStep?.wireAmps[w.id]} selected={selected === w.id} onSelect={() => { if (!locked) setSelected(w.id); }} />
-                ))}
-                {preview && <line className="wire-preview" x1={preview.x1} y1={preview.y1} x2={preview.x2} y2={preview.y2} />}
+                {build.wires.map(w => {
+                  const points = routes.get(w.id);
+                  return points && <WirePath key={w.id} wire={w} points={points} amps={lastStep?.wireAmps[w.id]} selected={selected === w.id} onSelect={() => { if (!locked) setSelected(w.id); }} />;
+                })}
+                {preview && <path className="wire-preview" d={draftPath(preview)} />}
               </svg>
 
               {build.parts.length === 0 && <p className="board-empty">Drag a part here, or click it to place it.</p>}
-              {build.parts.length > 0 && build.wires.length === 0 && !locked && <p className="board-tip">Drag from one circle to another to add a wire.</p>}
+              {build.parts.length > 0 && build.wires.length === 0 && !locked && (
+                <p className="board-tip">{showGuide ? 'Drag from one circle to another with the same number.' : 'Drag from one circle to another to add a wire.'}</p>
+              )}
 
               {build.parts.map(p => {
                 const lit = lastStep?.lit.includes(p.id) ?? false;
@@ -248,6 +267,7 @@ export function WorkshopLevel({ entry, picker, map, best, onResult, onNext }: Pr
                     style={{ left: p.x, top: p.y, width: PART_W, height: PART_H }}
                     onPointerDown={e => startMovePart(e, p)} onKeyDown={e => onPartKey(e, p)}
                   >
+                    <PartIcon name={PART_ICONS[p.kind]} />
                     <span className="part-name">{PART_INFO[p.kind].name}</span>
                     {p.kind === 'breaker' && (
                       <select
@@ -260,16 +280,18 @@ export function WorkshopLevel({ entry, picker, map, best, onResult, onNext }: Pr
                     )}
                     {open && <span className="part-state">OPEN</span>}
                     {PART_INFO[p.kind].watts !== undefined && <span className="part-state">{lit ? 'ON' : 'off'}</span>}
-                    {(['a', 'b'] as const).map(end => {
+                    {(['a', 'b'] as const).map((end, i) => {
                       const t = `${p.id}.${end}`;
+                      const label = PART_INFO[p.kind][end];
                       return (
                         <button
                           key={end} id={`term-${p.id}-${end}`} type="button" disabled={locked} {...{ [TERMINAL_ATTR]: t }}
                           className={`term ${end}${pending === t ? ' pending' : ''}${build.wires.some(w => w.from === t || w.to === t) ? ' wired' : ''}`}
-                          aria-label={`${PART_INFO[p.kind].name}, ${PART_INFO[p.kind][end] || (end === 'a' ? 'left side' : 'right side')}`}
+                          aria-label={`${PART_INFO[p.kind].name}, ${label}`} title={TERM_TITLES[label]}
                           onPointerDown={e => startWireDrag(e, t)} onClick={() => clickTerminal(t)}
                         >
-                          {PART_INFO[p.kind][end]}
+                          {showGuide && mission.guide[p.kind]?.[i]}
+                          <span className="term-label">{label}</span>
                         </button>
                       );
                     })}
@@ -347,13 +369,11 @@ function terminalAt(parts: readonly PlacedPart[], t: Terminal): WireEnd | null {
   return p ? { x: end === 'a' ? p.x : p.x + PART_W, y: p.y + PART_H / 2, dir: end === 'a' ? -1 : 1 } : null;
 }
 
-function WirePath({ wire, parts, amps, selected, onSelect }: { wire: Wire; parts: readonly PlacedPart[]; amps: number | undefined; selected: boolean; onSelect: () => void }) {
-  const a = terminalAt(parts, wire.from), b = terminalAt(parts, wire.to);
-  if (!a || !b) return null;
-  const boxes = parts.map(p => ({ left: p.x, right: p.x + PART_W, top: p.y, bottom: p.y + PART_H }));
-  const d = wirePath(a, b, BOARD_W, BOARD_H, boxes);
+function WirePath({ wire, points, amps, selected, onSelect }: { wire: Wire; points: readonly Point[]; amps: number | undefined; selected: boolean; onSelect: () => void }) {
+  const d = pathOf(points);
   const live = (amps ?? 0) >= 0.01;
   const hot = live && (amps ?? 0) > cableAmps(wire.mm2);
+  const spot = labelSpot(points);
   return (
     <g id={wire.id} className={`wire${live ? ' live' : ''}${hot ? ' hot' : ''}${selected ? ' sel' : ''}`}>
       <path className="wire-hit" d={d} role="button" tabIndex={0} aria-label={`Wire, ${wire.mm2} mm²`}
@@ -361,7 +381,7 @@ function WirePath({ wire, parts, amps, selected, onSelect }: { wire: Wire; parts
         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(); } }}
       />
       <path className="wire-line" d={d} style={{ strokeWidth: 1.5 + wire.mm2 * 0.8 }} />
-      {live && <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 - 6} textAnchor="middle">{fmt(amps ?? 0, (amps ?? 0) >= 100 ? 0 : 1)} A</text>}
+      {live && <text x={spot.x} y={spot.y - 6} textAnchor="middle">{fmt(amps ?? 0, (amps ?? 0) >= 100 ? 0 : 1)} A</text>}
     </g>
   );
 }

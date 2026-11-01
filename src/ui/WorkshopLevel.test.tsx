@@ -108,7 +108,7 @@ describe('Level 1: single circuit', () => {
   it('makes a wire by dragging between two circles, with a preview, and marks both as connected', () => {
     render(<App />);
     place();
-    expect(screen.getByText(/Drag from one circle to another/)).toBeTruthy();
+    expect(screen.getByText(/Drag from one circle to another with the same number/)).toBeTruthy();
     const from = document.getElementById('term-battery1-a')!, to = document.getElementById('term-switch2-a')!;
     document.elementFromPoint = () => to;
 
@@ -149,11 +149,11 @@ describe('Level 1: single circuit', () => {
     render(<App />);
     click('buy-hint');
     expect(coins()).toBe('5 coins');
-    expect(screen.getByText(/Battery \+ to one side of the switch/)).toBeTruthy();
+    expect(screen.getByText(/Battery \+ to switch IN/)).toBeTruthy();
     expect((document.getElementById('buy-warm-lamps') as HTMLButtonElement).disabled).toBe(true); // 5 coins is not enough
     cleanup();
     render(<App />);
-    expect(screen.getByText(/Battery \+ to one side of the switch/)).toBeTruthy();
+    expect(screen.getByText(/Battery \+ to switch IN/)).toBeTruthy();
     expect(coins()).toBe('5 coins');
   });
 });
