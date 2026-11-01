@@ -52,6 +52,32 @@ describe('Level 1 flow', () => {
     expect(screen.getByText(/Power stayed on all day/)).toBeTruthy();
   });
 
+  it('shows the load chart only once the day has run, with a readout and an hourly table', async () => {
+    render(<App />);
+    await screen.findByRole('button', { name: 'Run the day' });
+    expect(screen.queryByText('Load through the day')).toBeNull();
+
+    // At the start of the replay the chart is up, but has not drawn the day or its trips yet
+    fireEvent.click(screen.getByRole('button', { name: 'Run the day' }));
+    expect(screen.getByText('Load through the day')).toBeTruthy();
+    expect(document.querySelector('.panel.chart clipPath rect')!.getAttribute('width')).toBe('0');
+    expect(document.querySelectorAll('.panel.chart .mark')).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Skip to result' }));
+    const chart =screen.getByRole('img', { name: /Busiest phase through the day/ });
+    expect(screen.getByText('Main breaker 63 A')).toBeTruthy();
+    expect(screen.getByText(/Bedroom 2 breaker tripped/)).toBeTruthy(); // the trip's mark
+    expect(screen.getAllByRole('row', { hidden: true })).toHaveLength(26); // header and 00:00 to 24:00
+
+    fireEvent.keyDown(chart, { key: 'ArrowRight' });
+    expect(document.querySelector('.chart-tip time')!.textContent).toBe('12:30');
+    fireEvent.blur(chart);
+    expect(document.querySelector('.chart-tip')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fix the design' }));
+    expect(screen.queryByText('Load through the day')).toBeNull();
+  });
+
   it('opens Level 2 once Level 1 has a star', async () => {
     render(<App />);
     await screen.findByRole('button', { name: 'Run the day' });
