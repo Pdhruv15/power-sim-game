@@ -52,6 +52,10 @@ The villa was wired with a few mistakes. Your job is to find and fix them.
 | 100 | Within budget (all lost at 25 % over) |
 | 100 | Solar share of the day's energy (full at 30 %) |
 
+While the day runs and on the result screen, **Load through the day** draws the current on the busiest phase against the
+main breaker and transformer limits, and marks each trip. Point at it, or use the arrow keys, to read any moment, or open
+the hourly table.
+
 3 stars need 900 points and no mistakes. Before the run you can still explore: drag the time slider, rotate the villa,
 show the roof, or click a room to see inside.
 
@@ -120,6 +124,7 @@ src/game/                game rules: pure TypeScript, like src/sim
   runDay.ts              scored day: frames, events, energy, peaks
   score.ts               points, stars and lesson cards
   hints.ts               Learn mode: each room's highest current
+  dayChart.ts            numbers for the load chart: busiest phase, limits and trips over the day
 src/render/SiteScene.ts  Three.js site: villas, flats, village rows, transformer, feeder pillars, riser, cables. Reads results only.
 src/render/Landscape.ts  the land tile, street, lamps, trees, lawns and pond (landscapeLayout.ts places them, tested)
 src/render/Sky.ts        gradient sky dome and stars

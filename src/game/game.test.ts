@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseLevel, type Level } from '../sim';
-import { connectedKva, designCost, hhmm, peakNeeds, runDay, scoreDay } from './index';
+import { connectedKva, dayChart, designCost, hhmm, peakNeeds, runDay, scoreDay } from './index';
 
 const sample = (): Level =>
   parseLevel(JSON.parse(readFileSync(new URL('../../public/data/villa.json', import.meta.url), 'utf8')));
@@ -109,6 +109,58 @@ describe('scoreDay', () => {
     d.boards[0].solarKw = 0;
     expect(part(d, 'solar')).toBe(0);
     expect(score(d).lessons.map(l => l.title)).not.toContain('Solar helped');
+  });
+});
+
+describe('dayChart', () => {
+  const level = (name: string): Level =>
+    parseLevel(JSON.parse(readFileSync(new URL(`../../public/data/${name}.json`, import.meta.url), 'utf8')));
+  const chartOf = (l: Level) => dayChart(l, runDay(l));
+
+  it('has one point per frame, and a scale above everything drawn', () => {
+    const c = chartOf(fixed());
+    expect(c.points).toHaveLength(481);
+    expect(c.points[20].hour).toBeCloseTo(1);
+    expect(c.limits).toEqual([{ label: 'Main breaker', amps: 63 }]);
+    expect(c.ticks[0]).toBe(0);
+    expect(c.ticks.at(-1)).toBe(c.maxA);
+    expect(c.maxA).toBeGreaterThan(Math.max(...c.points.map(p => p.askedA), 63));
+  });
+
+  it('shows solar as a gap between what is asked for and what flows', () => {
+    const noon = chartOf(fixed()).points[240];
+    expect(noon.flowA).toBeLessThan(noon.askedA);
+    const night = chartOf(fixed()).points[40];
+    expect(night.flowA).toBeCloseTo(night.askedA);
+  });
+
+  it('counts only the busiest phase, so spreading the load lowers the line', () => {
+    const before = level('two-villas');
+    const after = level('two-villas');
+    const spread: Record<string, 'L1' | 'L2' | 'L3'> = { 1: 'L1', 5: 'L1', 2: 'L2', 6: 'L2', 3: 'L3', 4: 'L3' };
+    after.circuits.forEach(c => { c.phase = spread[c.id.slice(1)]; });
+    const peak = (l: Level) => Math.max(...chartOf(l).points.map(p => p.askedA));
+    expect(peak(after)).toBeLessThan(peak(before) * 0.5);
+  });
+
+  it('adds the transformer limit, and keeps showing what is asked for after a blackout', () => {
+    const c = chartOf(level('village'));
+    expect(c.limits.map(l => l.label)).toEqual(['Main breaker', 'Transformer']);
+    expect(c.limits[1].amps).toBeCloseTo(72.5, 1);
+    expect(c.marks.some(m => /Village transformer overheated/.test(m.text))).toBe(true);
+    const last = c.points.at(-1)!;
+    expect(last.flowA).toBe(0);
+    expect(last.askedA).toBeGreaterThan(0);
+  });
+
+  it('marks a short circuit, stops counting that room, and leaves out "above 90 %" events', () => {
+    const c = chartOf(level('building'));
+    expect(c.marks.some(m => /kettle lead shorts/.test(m.text))).toBe(true);
+    expect(c.marks.some(m => /above 90 %/.test(m.text))).toBe(false);
+    const l = level('building');
+    l.faults = [];
+    const noFault = chartOf(l).points[479];
+    expect(c.points[479].askedA).toBeLessThanOrEqual(noFault.askedA);
   });
 });
 
