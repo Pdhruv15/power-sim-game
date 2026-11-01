@@ -5,3 +5,4 @@ export * from './format';
 export * from './hints';
 export * from './runDay';
 export * from './score';
+export * from './workshop';

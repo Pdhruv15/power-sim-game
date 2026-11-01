@@ -2,6 +2,7 @@
 export * from './types';
 export * from './parse';
 export * from './cables';
+export * from './circuit';
 export * from './profiles';
 export * from './sun';
 export * from './breaker';

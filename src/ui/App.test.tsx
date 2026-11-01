@@ -9,8 +9,11 @@ import { App } from './App';
 const file = (name: string) => readFileSync(resolve(process.cwd(), 'public/data', name), 'utf8');
 const LEVEL_FILES: Record<string, string> = Object.fromEntries(['villa.json', 'two-villas.json', 'building.json', 'village.json'].map(n => [n, file(n)]));
 
+const STARTER_DONE = { 'level-circuit': { score: 3, stars: 3 }, 'level-room': { score: 3, stars: 3 } };
+
 beforeEach(() => {
   localStorage.clear();
+  localStorage.setItem('power-sim:progress:v1', JSON.stringify(STARTER_DONE));
   vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(LEVEL_FILES[url.split('/').pop()!], { status: 200 })));
   // jsdom has no WebGL: the 3D view shows its fallback message and the rest of the game still runs.
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -64,7 +67,7 @@ describe('Level 1 flow', () => {
     expect(document.querySelectorAll('.panel.chart .mark')).toHaveLength(0);
 
     fireEvent.click(screen.getByRole('button', { name: 'Skip to result' }));
-    const chart =screen.getByRole('img', { name: /Busiest phase through the day/ });
+    const chart = screen.getByRole('img', { name: /Busiest phase through the day/ });
     expect(screen.getByText('Main breaker 63 A')).toBeTruthy();
     expect(screen.getByText(/Bedroom 2 breaker tripped/)).toBeTruthy(); // the trip's mark
     expect(screen.getAllByRole('row', { hidden: true })).toHaveLength(26); // header and 00:00 to 24:00
@@ -78,10 +81,10 @@ describe('Level 1 flow', () => {
     expect(screen.queryByText('Load through the day')).toBeNull();
   });
 
-  it('opens Level 2 once Level 1 has a star', async () => {
+  it('opens Two villas once One villa has a star', async () => {
     render(<App />);
     await screen.findByRole('button', { name: 'Run the day' });
-    const level2 = screen.getByRole('button', { name: /Level 2/ }) as HTMLButtonElement;
+    const level2 = screen.getByRole('button', { name: /Level 4/ }) as HTMLButtonElement;
     expect(level2.disabled).toBe(true);
 
     runAndSkip();
@@ -95,13 +98,13 @@ describe('Level 1 flow', () => {
     expect(scorePanel().getByText(/Phases unbalanced: Villa A/)).toBeTruthy();
   });
 
-  it('plays Level 3 with the short-circuit hint', async () => {
+  it('plays the building with the short-circuit hint', async () => {
     localStorage.setItem('power-sim:progress:v1', JSON.stringify({
-      'level-1-villa': { score: 905, stars: 3 }, 'level-2-two-villas': { score: 800, stars: 2 },
+      ...STARTER_DONE, 'level-1-villa': { score: 905, stars: 3 }, 'level-2-two-villas': { score: 800, stars: 2 },
     }));
     render(<App />);
     await screen.findByRole('button', { name: 'Run the day' });
-    fireEvent.click(screen.getByRole('button', { name: /Level 3/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Level 5/ }));
     expect(await screen.findByText(/Short circuit here at 19:30: about 518 A/)).toBeTruthy();
     expect(document.getElementById('ph-2B')).toBeTruthy(); // each flat picks its phase
 
@@ -110,13 +113,13 @@ describe('Level 1 flow', () => {
     expect(scorePanel().getByText(/Too many breakers tripped: Kitchen/)).toBeTruthy();
   });
 
-  it('plays Level 4 with a transformer choice', async () => {
+  it('plays the village with a transformer choice', async () => {
     localStorage.setItem('power-sim:progress:v1', JSON.stringify({
-      'level-1-villa': { score: 905, stars: 3 }, 'level-2-two-villas': { score: 800, stars: 2 }, 'level-3-building': { score: 800, stars: 2 },
+      ...STARTER_DONE, 'level-1-villa': { score: 905, stars: 3 }, 'level-2-two-villas': { score: 800, stars: 2 }, 'level-3-building': { score: 800, stars: 2 },
     }));
     render(<App />);
     await screen.findByRole('button', { name: 'Run the day' });
-    fireEvent.click(screen.getByRole('button', { name: /Level 4/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Level 6/ }));
     expect(await screen.findByText(/Every room at once: 85 kVA · busiest moment: 69 kVA at 12:00/)).toBeTruthy();
     expect(screen.getByText(/Busiest phase: 416 % of this size/)).toBeTruthy();
 
@@ -136,17 +139,18 @@ describe('Level 1 flow', () => {
 
   it('offers label modes everywhere and a floor choice for the building', async () => {
     localStorage.setItem('power-sim:progress:v1', JSON.stringify({
-      'level-1-villa': { score: 905, stars: 3 }, 'level-2-two-villas': { score: 800, stars: 2 },
+      ...STARTER_DONE, 'level-1-villa': { score: 905, stars: 3 }, 'level-2-two-villas': { score: 800, stars: 2 },
     }));
     render(<App />);
     await screen.findByRole('button', { name: 'Run the day' });
-    const labels = within(screen.getByRole('group', { name: 'Labels' }));
+    fireEvent.click(screen.getByRole('button', { name: /Level 3/ }));
+    const labels = within(await screen.findByRole('group', { name: 'Labels' }));
     expect(labels.getByRole('button', { name: 'Smart' }).getAttribute('aria-pressed')).toBe('true');
     fireEvent.click(labels.getByRole('button', { name: 'All' }));
     expect(labels.getByRole('button', { name: 'All' }).getAttribute('aria-pressed')).toBe('true');
     expect(screen.queryByRole('group', { name: 'Floors' })).toBeNull(); // one-storey villa
 
-    fireEvent.click(screen.getByRole('button', { name: /Level 3/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Level 5/ }));
     const floors = within(await screen.findByRole('group', { name: 'Floors' }));
     fireEvent.click(floors.getByRole('button', { name: '1' }));
     expect(floors.getByRole('button', { name: '1' }).getAttribute('aria-pressed')).toBe('true');
