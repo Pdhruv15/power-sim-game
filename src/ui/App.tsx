@@ -7,6 +7,7 @@ import { DesignPanel } from './DesignPanel';
 import { EventLog } from './EventLog';
 import { Kpis } from './Kpis';
 import { LEVELS, WORLD_MAP, type LevelEntry } from './levels';
+import { LoadChart } from './LoadChart';
 import { isUnlocked, loadProgress, saveResult, type Best } from './progress';
 import { ScorePanel } from './ScorePanel';
 import { Stage } from './Stage';
@@ -217,6 +218,7 @@ function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
             onSecondary={phase.kind === 'design' ? resetBreakers : finishRun}
           />
           <p className="hint-line">Drag to rotate · scroll to zoom · right-drag to pan · point at a room for details</p>
+          {phase.kind !== 'design' && <LoadChart level={design} day={phase.day} hour={result.hour} />}
           <CircuitList result={result} selected={faded} onSelect={toggleRoom} />
         </div>
 

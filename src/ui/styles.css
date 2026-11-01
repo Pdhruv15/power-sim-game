@@ -168,6 +168,42 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .row.board:hover { background: none; }
 .fault-hint { color: var(--warn); }
 
+/* ---------- load chart ---------- */
+.chart-note { margin: 0; font-size: 13px; color: var(--muted); }
+.key, .legend i.key { display: inline-block; width: 14px; height: 2px; margin-right: 5px; vertical-align: 3px; border-radius: 1px; }
+.key.flow { background: var(--accent); }
+.key.asked { background: var(--muted); }
+.key.limit { background: repeating-linear-gradient(90deg, var(--fg) 0 3px, transparent 3px 6px); }
+.trip-key { color: var(--high); font-weight: 600; margin-right: 5px; }
+.chart-plot { position: relative; min-width: 0; }
+.chart-plot svg { display: block; touch-action: pan-y; }
+.chart-plot svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chart-plot .grid { stroke: var(--line); stroke-width: 1; }
+.chart-plot .tick, .chart-plot .limit-label { font: 10.5px var(--mono); fill: var(--muted); font-variant-numeric: tabular-nums; }
+.chart-plot .limit-label { fill: var(--fg); paint-order: stroke; stroke: var(--panel); stroke-width: 3px; stroke-linejoin: round; }
+.chart-plot .limit { stroke: var(--fg); stroke-width: 1; stroke-dasharray: 3 3; }
+.chart-plot .asked-line, .chart-plot .flow-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart-plot .asked-line { stroke: var(--muted); }
+.chart-plot .flow-line { stroke: var(--accent); }
+.chart-plot .flow-area { fill: var(--accent); opacity: .1; }
+.chart-plot .mark { font: 600 12px var(--body); fill: var(--high); }
+.chart-plot .mark-line { stroke: var(--high); stroke-width: 1; opacity: .6; }
+.chart-plot .crosshair { stroke: var(--fg); stroke-width: 1; }
+.chart-tip { position: absolute; top: 8px; z-index: 2; margin-left: 10px; max-width: 260px; pointer-events: none; padding: 6px 9px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 4px; font-size: 12px; white-space: nowrap; }
+.chart-tip.left { margin-left: 0; transform: translateX(calc(-100% - 10px)); }
+.chart-tip time { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.chart-tip p { margin: 2px 0 0; color: var(--muted); }
+.chart-tip p b { color: var(--fg); font-family: var(--mono); font-weight: 500; font-variant-numeric: tabular-nums; }
+.chart-tip .key { margin-right: 6px; }
+.chart-tip .tip-mark { color: var(--fg); white-space: normal; }
+.chart-table summary { cursor: pointer; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.chart-table summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chart-table table { width: 100%; margin-top: 6px; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.chart-table th { text-align: right; font-weight: 500; color: var(--muted); padding: 3px 6px; }
+.chart-table td { text-align: right; padding: 2px 6px; border-top: 1px solid var(--line); font-family: var(--mono); }
+.chart-table th:first-child, .chart-table td:first-child { text-align: left; }
+
 /* ---------- view bar over the 3D scene ---------- */
 .viewbar { position: absolute; right: 10px; bottom: 8px; z-index: 2; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: calc(100% - 20px); }
 .seg { display: flex; align-items: center; background: color-mix(in srgb, var(--bg) 85%, transparent); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
