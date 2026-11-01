@@ -1,4 +1,4 @@
-import { BANDS, Simulator, topBoard, TRANSFORMER_ID, type FaultResult, type Level, type PhaseAmps, type SimResult } from '../sim';
+import { BANDS, firstStartHour, Simulator, topBoard, TRANSFORMER_ID, type FaultResult, type Level, type PhaseAmps, type SimResult } from '../sim';
 import { fmt } from './format';
 
 /** Fixed step for a scored day: 3 minutes, 480 frames. The same frames drive the replay. */
@@ -36,6 +36,13 @@ export interface DayFault extends FaultResult {
   text: string;
 }
 
+export interface DayStart {
+  circuit: string;
+  hour: number;
+  amps: number;
+  tripped: string[];
+}
+
 export interface DayRun {
   /** One result per step from 00:00 to 24:00 inclusive. */
   frames: SimResult[];
@@ -60,6 +67,8 @@ export interface DayRun {
   faults: DayFault[];
   /** Breakers opened by a short circuit rather than by overload. */
   faultTripped: Set<string>;
+  /** Each motor's first start of the day. */
+  starts: DayStart[];
 }
 
 /** Run a whole day from midnight with fresh breakers and record what happened. */
@@ -81,6 +90,11 @@ export function runDay(level: Level): DayRun {
   const faulted = new Set<string>();
   const faultTripped = new Set<string>();
   const pending = [...level.faults].sort((a, b) => a.hour - b.hour);
+  const starts: DayStart[] = [];
+  const startsDue = level.circuits.flatMap(c => {
+    const at = firstStartHour(c.type);
+    return at === null ? [] : [{ circuit: c.id, hour: at }];
+  }).sort((a, b) => a.hour - b.hour);
   const name = (id: string) => level.circuits.find(c => c.id === id)?.room ?? level.boards.find(b => b.id === id)?.name ?? id;
 
   for (let i = 0; i <= steps; i++) {
@@ -134,6 +148,20 @@ export function runDay(level: Level): DayRun {
       });
     }
 
+    // Motors due to start by now pull their surge before time moves on
+    while (startsDue.length && startsDue[0].hour <= hour + 1e-9) {
+      const due = startsDue.shift()!;
+      const res = sim.startMotor(due.circuit);
+      starts.push({ ...res, hour: due.hour });
+      for (const id of res.tripped) tripHour.set(id, due.hour);
+      if (res.tripped.length) {
+        events.push({
+          hour: due.hour, kind: res.tripped.includes(due.circuit) ? 'trip' : res.tripped.includes(topId) ? 'main-trip' : 'board-trip', target: res.tripped[0],
+          text: `${name(due.circuit)} started at ${fmt(res.amps, 0)} A: ${res.tripped.map(name).join(', ')} opened at once`,
+        });
+      }
+    }
+
     sim.advance(dt);
 
     // Record breakers that opened during this step
@@ -159,6 +187,6 @@ export function runDay(level: Level): DayRun {
 
   return {
     frames, events, energy, peaks, boardPeaks, drops, tripHour,
-    mainTripHour: tripHour.get(topId) ?? null, mainPeak: boardPeaks.get(topId)!, transformerPeak, faults, faultTripped,
+    mainTripHour: tripHour.get(topId) ?? null, mainPeak: boardPeaks.get(topId)!, transformerPeak, faults, faultTripped, starts,
   };
 }

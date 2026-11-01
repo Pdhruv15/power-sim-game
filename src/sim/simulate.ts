@@ -1,5 +1,6 @@
 import { BOARD_INSTANT_TRIP, hoursToTrip, INSTANT_TRIP, NEW_BREAKER, stepBreaker, type BreakerState } from './breaker';
 import { cableDropV, loopOhms } from './cables';
+import { startAmps } from './loads';
 import { branchCurrents, levelNetwork, maxPhase, onPhase, TRANSFORMER_ID, type Network, type PhaseAmps } from './network';
 import { POWER_FACTOR, profileAt, wrapHour } from './profiles';
 import { pvOutput, sunAt, type Sun } from './sun';
@@ -119,6 +120,15 @@ export interface SimResult {
   transformer: TransformerResult | null;
 }
 
+/** What happened when a motor started. */
+export interface MotorStart {
+  circuit: string;
+  /** Current in the moment it started. 0 if it had no power. */
+  amps: number;
+  /** Breakers the surge opened. */
+  tripped: string[];
+}
+
 /**
  * Runs a level through the day. Pure logic with no rendering, so the same class can run
  * in the browser game, in tests, or inside LV Design Studio.
@@ -207,6 +217,23 @@ export class Simulator {
       selective: tripped.length === 1 && tripped[0] === c.id,
       path: path.map(p => ({ id: p.id, instantA: p.ratingA * p.instant })),
     };
+  }
+
+  /**
+   * A motor starts now. Its surge passes through every breaker back to the supply, and any breaker
+   * that sees its instant-trip current opens at once. A motor with no power does nothing.
+   */
+  startMotor(circuitId: string): MotorStart {
+    const c = this.level.circuits.find(x => x.id === circuitId)!;
+    const amps = startAmps(c.kw, c.type, this.level.voltage);
+    const path = [{ id: c.id, ratingA: c.breakerA, instant: INSTANT_TRIP }];
+    for (let b = this.board(c.board); b; b = b.parent ? this.board(b.parent) : undefined) {
+      path.push({ id: b.id, ratingA: b.breakerA, instant: BOARD_INSTANT_TRIP });
+    }
+    if (path.some(p => this.breaker(p.id).tripped)) return { circuit: c.id, amps: 0, tripped: [] };
+    const tripped = path.filter(p => amps >= p.ratingA * p.instant).map(p => p.id);
+    for (const id of tripped) this.breakers.set(id, { heat: 1, tripped: true });
+    return { circuit: c.id, amps, tripped };
   }
 
   private board(id: string) {

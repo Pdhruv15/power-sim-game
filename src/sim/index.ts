@@ -4,6 +4,7 @@ export * from './parse';
 export * from './cables';
 export * from './circuit';
 export * from './profiles';
+export * from './loads';
 export * from './sun';
 export * from './breaker';
 export * from './transformer';

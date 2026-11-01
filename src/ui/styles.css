@@ -343,3 +343,34 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .solar-pick { display: flex; flex-direction: column; gap: 2px; }
 .solar-pick span { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
 .wired-count { margin: 0; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+
+/* ---------- load library ---------- */
+.load-lib { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.load-cards { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.load-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.load-card { display: flex; align-items: center; gap: 8px; text-align: left; background: var(--panel-2); border: 1px solid var(--line); border-left: 4px solid var(--muted); border-radius: 4px; padding: 8px; cursor: pointer; color: var(--fg); }
+.load-card span { display: flex; flex-direction: column; min-width: 0; }
+.load-card b { font-size: 13px; }
+.load-card small { font-size: 11px; color: var(--muted); }
+.load-card .on-job { color: var(--accent); }
+.load-card[aria-pressed="true"] { border-color: var(--accent); }
+.load-card.heating { border-left-color: var(--warn); }
+.load-card.motor { border-left-color: var(--high); }
+.load-card.electronics { border-left-color: var(--accent); }
+.load-card.timed { border-left-color: var(--ok); }
+.load-detail { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.load-detail h3, .load-detail p { margin: 0; }
+.load-detail dl { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; margin: 0; }
+.load-detail dt { color: var(--muted); }
+.load-detail dd { margin: 0; font-family: var(--mono); text-align: right; }
+.load-breaker { display: flex; align-items: center; justify-content: space-between; gap: 8px; white-space: nowrap; }
+.start-chart { width: 100%; height: auto; border-bottom: 1px solid var(--line); }
+.start-chart path { fill: none; stroke: var(--high); stroke-width: 2.5; }
+.start-chart .limit { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
+.verdict { font-weight: 600; }
+.verdict.ok { color: var(--ok); }
+.verdict.bad { color: var(--high); }
+.load-day { display: flex; align-items: flex-end; gap: 1px; height: 36px; }
+.load-day i { flex: 1; background: var(--accent); }
+.load-detail small { color: var(--muted); font-size: 11px; }
+.part-state.starts { color: var(--high); }

@@ -3,11 +3,9 @@ import {
   BOARD_BREAKER_SIZES, BREAKER_SIZES, connectedKva, DEFAULT_POINTS, designCost, peakNeeds, SIZING_RULE, SOLAR_OPTIONS, TRANSFORMER_SIZES, type PeakNeed,
 } from '../game';
 import {
-  BOARD_INSTANT_TRIP, CABLE_SIZES, cableAmps, INSTANT_TRIP, PHASES, Simulator, topBoard, transformerRatedAmps, type Board, type Circuit, type Level, type Phase,
+  LOAD_LIBRARY, BOARD_INSTANT_TRIP, CABLE_SIZES, cableAmps, INSTANT_TRIP, PHASES, Simulator, topBoard, transformerRatedAmps, type Board, type Circuit, type Level, type Phase,
 } from '../sim';
 import { fmt, hhmm } from './format';
-
-const TYPE_NAME = { ac: 'AC', lighting: 'Lighting', sockets: 'Sockets', shop: 'Shop', school: 'School' } as const;
 
 interface Props {
   design: Level;
@@ -122,7 +120,7 @@ export function DesignPanel({ design, onChange, onRestore, onRun }: Props) {
                       <div className="nm">
                         <b>{c.id} {c.room}</b>
                         <small>
-                          {TYPE_NAME[c.type]} · {c.kw} kW{c.lengthM > 0 && ` · ${c.lengthM} m`} · needs up to {fmt(n?.amps ?? 0)} A at {hhmm(n?.hour ?? 0)}
+                          {LOAD_LIBRARY[c.type].name} · {c.kw} kW{c.lengthM > 0 && ` · ${c.lengthM} m`} · needs up to {fmt(n?.amps ?? 0)} A at {hhmm(n?.hour ?? 0)}
                         </small>
                         {faultAmps.has(c.id) && (
                           <small className="fault-hint">

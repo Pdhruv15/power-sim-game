@@ -33,7 +33,10 @@ const SYMBOLS = {
 export type IconName = keyof typeof SYMBOLS;
 export const ICON_NAMES = Object.keys(SYMBOLS) as IconName[];
 
-const LOAD_ICONS: Readonly<Record<LoadType, IconName>> = { lighting: 'lamp', sockets: 'socket', ac: 'motor', shop: 'board', school: 'board' };
+const LOAD_ICONS: Readonly<Record<LoadType, IconName>> = {
+  lighting: 'lamp', sockets: 'socket', ac: 'motor', shop: 'board', school: 'board',
+  heater: 'heater', pump: 'motor', lift: 'motor', computers: 'electronics', ev: 'ev', streetlight: 'lamp', hospital: 'electronics',
+};
 
 /** Symbol for a circuit, from the kind of load it feeds. */
 export const loadIcon = (type: LoadType): IconName => LOAD_ICONS[type];

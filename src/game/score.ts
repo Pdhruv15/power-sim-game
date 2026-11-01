@@ -1,5 +1,5 @@
-import { BANDS, cableAmps, PHASES, topBoard, TRANSFORMER_ID, type Level } from '../sim';
-import { designCost } from './catalog';
+import { BANDS, BOARD_INSTANT_TRIP, cableAmps, INSTANT_TRIP, PHASES, topBoard, TRANSFORMER_ID, type Level } from '../sim';
+import { BREAKER_SIZES, designCost } from './catalog';
 import { fmt, hhmm } from './format';
 import { connectedKva } from './hints';
 import type { DayRun } from './runDay';
@@ -78,11 +78,22 @@ export function scoreDay(level: Level, day: DayRun): ScoreCard {
   // ---- Power kept on
   points.supply = max('supply') * (day.energy.demand > 0 ? day.energy.supplied / day.energy.demand : 1);
   const overloadTrip = (id: string) => (day.faultTripped.has(id) ? undefined : day.tripHour.get(id));
+  const surgeOn = (id: string) => day.starts.find(s => s.tripped.includes(id));
+  const roomName = (id: string) => level.circuits.find(c => c.id === id)?.room ?? id;
   for (const b of level.boards) {
     const at = overloadTrip(b.id);
     if (at === undefined) continue;
     const p = day.boardPeaks.get(b.id)!;
     const isMain = b.id === top.id;
+    const boardSurge = surgeOn(b.id);
+    if (boardSurge) {
+      mistakes.push({
+        kind: 'mistake', target: b.id, title: `Board breaker opened by a motor starting: ${b.name}`,
+        text: `${roomName(boardSurge.circuit)} started at ${fmt(boardSurge.amps, 0)} A, and the ${b.breakerA} A board breaker opens at once from ${b.breakerA * BOARD_INSTANT_TRIP} A. ` +
+          'Every room behind it lost power. Pick a bigger board breaker.',
+      });
+      continue;
+    }
     mistakes.push({
       kind: 'mistake', target: b.id, title: isMain ? 'Main breaker too small' : `Feeder breaker too small: ${b.name}`,
       text: `${isMain ? 'Everything together' : b.name} needed ${fmt(p.amps)} A on the busiest phase, but the breaker is ${b.breakerA} A. ` +
@@ -94,6 +105,15 @@ export function scoreDay(level: Level, day: DayRun): ScoreCard {
     const at = overloadTrip(c.id);
     if (at === undefined) continue;
     const p = day.peaks.get(c.id)!;
+    const surge = surgeOn(c.id);
+    if (surge) {
+      mistakes.push({
+        kind: 'mistake', target: c.id, title: `Breaker opened as the motor started: ${c.room}`,
+        text: `${c.room} runs at ${fmt(p.amps)} A but starts at ${fmt(surge.amps, 0)} A, and a ${c.breakerA} A breaker opens at once from ${c.breakerA * INSTANT_TRIP} A. ` +
+          `Pick at least ${BREAKER_SIZES.find(a => a * INSTANT_TRIP > surge.amps) ?? BREAKER_SIZES[BREAKER_SIZES.length - 1]} A, on a cable that can carry it.`,
+      });
+      continue;
+    }
     mistakes.push({
       kind: 'mistake', target: c.id, title: `Breaker too small: ${c.room}`,
       text: `${c.room} needs up to ${fmt(p.amps)} A at ${hhmm(p.hour)}, but its breaker is ${c.breakerA} A. ` +
@@ -102,6 +122,10 @@ export function scoreDay(level: Level, day: DayRun): ScoreCard {
     });
   }
   if ([...day.tripHour.keys()].every(id => day.faultTripped.has(id)) && day.faults.every(f => f.selective)) good.push({ kind: 'good', title: 'Power stayed on all day', text: 'No breaker tripped. Every room had power for the whole day.' });
+
+  if (day.starts.length && day.starts.every(s => s.tripped.length === 0)) {
+    good.push({ kind: 'good', title: 'Motors started cleanly', text: 'Every breaker rode through the surge when its motor started.' });
+  }
 
   // ---- Safety: each breaker must protect its cable
   let unsafe = 0;

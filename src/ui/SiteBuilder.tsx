@@ -2,8 +2,9 @@ import { useMemo, useRef, useState } from 'react';
 import {
   BOARD_BREAKER_SIZES, BREAKER_SIZES, DEFAULT_POINTS, designCost, peakNeeds, siteDesign, SOLAR_OPTIONS, SIZING_RULE, type SiteBuild,
 } from '../game';
-import { CABLE_SIZES, cableAmps, PHASES, type Board, type Level, type Phase } from '../sim';
+import { CABLE_SIZES, cableAmps, LOAD_LIBRARY, PHASES, startAmps, type Board, type Level, type Phase } from '../sim';
 import { fmt, hhmm } from './format';
+import { LoadLibrary } from './LoadLibrary';
 import { loadIcon, PartIcon, TERM_TITLES } from './PartIcon';
 import { trackDrag } from './trackDrag';
 import { TERMINAL_ATTR, useWireDrag } from './useWireDrag';
@@ -64,6 +65,7 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
   const [selected, setSelected] = useState<string | null>(null);
   const [tip, setTip] = useState<string | null>(null);
   const [ghost, setGhost] = useState<{ name: string; x: number; y: number } | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const area = useRef<HTMLDivElement>(null);
   const dragged = useRef(false);
   const street = { x: STREET.x, y: boardH / 2 - STREET.h / 2 };
@@ -330,6 +332,7 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
                 <div key={c.id} id={`room-${c.id}`} role="group" aria-label={c.room} className="part room-part" style={{ left: at.x, top: at.y, width: ROOM_W, height: ROOM_H }}>
                   <span className="part-title"><PartIcon name={loadIcon(c.type)} size={22} /><span className="part-name">{c.room}</span></span>
                   <small className="part-state">up to {fmt(need?.amps ?? 0)} A at {hhmm(need?.hour ?? 0)}</small>
+                  {LOAD_LIBRARY[c.type].startMultiple > 1 && <small className="part-state starts">starts at {fmt(startAmps(c.kw, c.type, level.voltage), 0)} A</small>}
                   <span className="room-picks">
                     <select
                       id={`brk-${c.id}`} aria-label={`${c.room} breaker`} value={room.breakerA}
@@ -352,11 +355,14 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
 
         <div className="controls workshop-controls">
           <button type="button" id="power-on" className="btn primary power-on" onClick={pressPowerOn}>Power On</button>
+          <button type="button" id="open-library" className="btn" aria-expanded={libraryOpen} onClick={() => setLibraryOpen(o => !o)}>Load library</button>
           <span className="hint-now">{pending ? 'Now click where this wire goes.' : 'Drag between two circles to add a wire, or click one, then the other. New wires use the cable picked above.'}</span>
           {selectedBoard
             ? <button type="button" className="btn" onClick={() => removeBoard(selectedBoard.id)}>Remove the board</button>
             : selected && <button type="button" className="btn" onClick={removeWire}>Remove the wire</button>}
         </div>
+
+        {libraryOpen && <LoadLibrary voltage={level.voltage} onThisJob={[...new Set(level.circuits.map(c => c.type))]} />}
       </div>
 
       <div className="side">

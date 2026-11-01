@@ -84,7 +84,7 @@ describe('parseLevel', () => {
   });
   it('lists every problem', () => {
     const bad = { project: 'x', supply: { voltage: 230 }, circuits: [
-      { id: 'A', room: 'R', type: 'heater', kw: 1, breakerA: 10 },
+      { id: 'A', room: 'R', type: 'spaceship', kw: 1, breakerA: 10 },
       { id: 'A', room: 'R', type: 'ac', kw: -1, breakerA: 10 },
     ] };
     try { parseLevel(bad); expect.unreachable(); } catch (e) {

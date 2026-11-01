@@ -20,8 +20,12 @@ export const LEVELS: readonly LevelEntry[] = [
     id: 'level-2-two-villas', number: 4, title: 'Two villas', file: 'data/two-villas.json',
     buildGoal: 'Feed two villas from a pillar at the gate. Villa B is far away, so its feeder needs thought. Spread the rooms over L1, L2 and L3, and keep the voltage at every room within 5 %.',
   },
-  { id: 'level-3-building', number: 5, title: 'Apartment building', file: 'data/building.json' },
-  { id: 'level-4-village', number: 6, title: 'Village', file: 'data/village.json' },
+  {
+    id: 'level-services', number: 5, title: 'Service block', file: 'data/services.json',
+    buildGoal: 'Feed the services of a small block. Look each load up in the library: motors pull far more to start than to run, so their breakers need room for the surge.',
+  },
+  { id: 'level-3-building', number: 6, title: 'Apartment building', file: 'data/building.json' },
+  { id: 'level-4-village', number: 7, title: 'Village', file: 'data/village.json' },
 ];
 
 /** The world the player lights up, step by step. Steps with no level yet are still to come. */
@@ -30,6 +34,7 @@ export const WORLD_MAP: readonly { name: string; level?: string }[] = [
   { name: 'Room', level: 'level-room' },
   { name: 'Villa', level: 'level-1-villa' },
   { name: 'Street', level: 'level-2-two-villas' },
+  { name: 'Block', level: 'level-services' },
   { name: 'Village', level: 'level-4-village' },
   { name: 'Villages' },
   { name: 'Small city' },

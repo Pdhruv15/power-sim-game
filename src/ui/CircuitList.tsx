@@ -1,7 +1,5 @@
-import { PHASES, type BoardResult, type CircuitResult, type SimResult, type TransformerResult } from '../sim';
+import { PHASES, type BoardResult, type CircuitResult, type SimResult, type TransformerResult, LOAD_LIBRARY } from '../sim';
 import { fmt } from './format';
-
-const TYPE_NAME = { ac: 'AC', lighting: 'Lighting', sockets: 'Sockets', shop: 'Shop', school: 'School' } as const;
 
 interface Props {
   result: SimResult;
@@ -44,7 +42,7 @@ export function CircuitList({ result, selected, onSelect }: Props) {
                       <span className="dot" />
                       <span className="nm">
                         <b>{c.id} {c.room}</b>
-                        <small>{TYPE_NAME[c.type]} · {c.breakerA} A{b.phases === 3 && ` · ${c.phase}`}{c.vdPct > 0 && ` · drop ${fmt(c.vdPct)} %`}</small>
+                        <small>{LOAD_LIBRARY[c.type].name} · {c.breakerA} A{b.phases === 3 && ` · ${c.phase}`}{c.vdPct > 0 && ` · drop ${fmt(c.vdPct)} %`}</small>
                       </span>
                       <span className="val"><b>{valueText(c)}</b><small>{detailText(c)}</small></span>
                       <LoadBar loading={c.dead ? 0 : c.loading} heat={c.tripped ? 0 : c.heat} />
