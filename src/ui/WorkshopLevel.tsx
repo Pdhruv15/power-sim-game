@@ -7,6 +7,7 @@ import { cableAmps } from '../sim';
 import { fmt } from './format';
 import type { LevelEntry } from './levels';
 import { loadWallet, saveWallet, type Best, type Wallet } from './progress';
+import { trackDrag } from './trackDrag';
 
 const BOARD_W = 860, BOARD_H = 440;
 const PART_W = 136, PART_H = 76;
@@ -121,24 +122,15 @@ export function WorkshopLevel({ entry, picker, map, best, onResult, onNext }: Pr
   }, [run]);
 
   const startDragFromTray = (e: React.PointerEvent, kind: PartKind) => {
-    const x0 = e.clientX, y0 = e.clientY;
     dragged.current = false;
-    const move = (ev: PointerEvent) => {
-      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) > 6) dragged.current = true;
-      if (dragged.current) setGhost({ kind, x: ev.clientX, y: ev.clientY });
-    };
-    const up = (ev: PointerEvent) => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
+    trackDrag(e, (x, y) => { dragged.current = true; setGhost({ kind, x, y }); }, (x, y, moved) => {
       setGhost(null);
       const box = board.current?.getBoundingClientRect();
-      if (!dragged.current || !box) return;
-      if (ev.clientX >= box.left && ev.clientX <= box.right && ev.clientY >= box.top && ev.clientY <= box.bottom) {
-        addPart(kind, ev.clientX - box.left - PART_W / 2, ev.clientY - box.top - PART_H / 2);
+      if (!moved || !box) return;
+      if (x >= box.left && x <= box.right && y >= box.top && y <= box.bottom) {
+        addPart(kind, x - box.left - PART_W / 2, y - box.top - PART_H / 2);
       }
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
+    });
   };
 
   const movePart = (id: string, x: number, y: number) =>

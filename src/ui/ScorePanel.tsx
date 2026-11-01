@@ -4,10 +4,12 @@ interface Props {
   card: ScoreCard;
   onFix: () => void;
   onReplay: () => void;
+  /** Coins this result earned. */
+  coins: number;
 }
 
-/** End-of-day score: total, stars, points per part and a short card for each lesson. */
-export function ScorePanel({ card, onFix, onReplay }: Props) {
+/** End-of-day score: total, stars, coins, points per part and a short card for each lesson. */
+export function ScorePanel({ card, onFix, onReplay, coins }: Props) {
   return (
     <aside className="panel score">
       <header>
@@ -17,6 +19,7 @@ export function ScorePanel({ card, onFix, onReplay }: Props) {
         </span>
       </header>
       <p className="total"><b>{card.total}</b> / {card.max} points</p>
+      {coins > 0 && <p className="coins-won">+{coins} coins</p>}
 
       <ul className="parts">
         {card.parts.map(p => (

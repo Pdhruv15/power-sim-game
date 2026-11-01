@@ -1,4 +1,4 @@
-import { BANDS, cableAmps, INSTANT_TRIP, joinedPoints, NEW_BREAKER, solveCircuit, stepBreaker, type Resistor } from '../sim';
+import { BANDS, cableAmps, INSTANT_TRIP, joinedPoints, NEW_BREAKER, solveCircuit, stepBreaker, topBoard, type Level, type Resistor } from '../sim';
 import { breakerPrice, cablePrice } from './catalog';
 import { fmt } from './format';
 
@@ -314,6 +314,50 @@ function testRoom(m: Mission, b: Build): PowerOnReport {
   const spare = b.wires.find(w => both.wireAmps[w.id] < NO_CURRENT_A);
   if (spare) return report(steps, 2, 'One wire carries no current. Remove it for the third star.', spare.id);
   return report(steps, 3, null);
+}
+
+/**
+ * A villa the player builds from the street: a board, then a cable and a breaker to each room.
+ * At this size wiring every return path by hand is busywork, so one wire stands for each run.
+ */
+export interface VillaBuild {
+  boardPlaced: boolean;
+  /** The street supply is wired to the board. */
+  supplyWired: boolean;
+  mainBreakerA: number;
+  solarKw: number;
+  /** Per room: its breaker, and the size of its cable once it is wired. */
+  rooms: Record<string, { breakerA: number; mm2: number | null }>;
+}
+
+/** An empty villa: nothing wired, and the smallest breakers, as they come out of the box. */
+export function newVillaBuild(level: Level, mainBreakerA: number, roomBreakerA: number): VillaBuild {
+  return {
+    boardPlaced: false, supplyWired: false, mainBreakerA, solarKw: 0,
+    rooms: Object.fromEntries(level.circuits.map(c => [c.id, { breakerA: roomBreakerA, mm2: null }])),
+  };
+}
+
+/**
+ * Turn a finished villa build into a design the day simulation can run.
+ * It needs every connection first, and until then it says what is missing.
+ */
+export function villaDesign(level: Level, b: VillaBuild): { design: Level; tip: null } | { design: null; tip: string } {
+  if (!b.boardPlaced) return { design: null, tip: 'Place the villa board first. Every room gets its power from there.' };
+  if (!b.supplyWired) return { design: null, tip: 'Wire the street supply to the board, so power can reach the house.' };
+  const dark = level.circuits.filter(c => b.rooms[c.id]?.mm2 == null);
+  if (dark.length) {
+    return { design: null, tip: `${dark.length === 1 ? `${dark[0].room} has` : `${dark.length} rooms have`} no cable yet. Wire the board to every room.` };
+  }
+  const top = topBoard(level).id;
+  return {
+    tip: null,
+    design: {
+      ...level,
+      boards: level.boards.map(x => (x.id === top ? { ...x, breakerA: b.mainBreakerA, solarKw: b.solarKw } : x)),
+      circuits: level.circuits.map(c => ({ ...c, breakerA: b.rooms[c.id].breakerA, cableMm2: b.rooms[c.id].mm2! })),
+    },
+  };
 }
 
 /** Coins for each star count. Only stars beyond the best so far pay out, so replays stay fair. */

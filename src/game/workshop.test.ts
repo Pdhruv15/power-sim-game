@@ -1,5 +1,9 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildCost, coinsEarned, MISSIONS, powerOn, type Build, type PartKind, type PlacedPart } from './workshop';
+import { parseLevel, type Level } from '../sim';
+import { runDay } from './runDay';
+import { scoreDay } from './score';
+import { buildCost, coinsEarned, MISSIONS, newVillaBuild, powerOn, villaDesign, type Build, type PartKind, type PlacedPart, type VillaBuild } from './workshop';
 
 const part = (id: string, kind: PartKind, breakerA?: number): PlacedPart => ({ id, kind, x: 0, y: 0, ...(breakerA && { breakerA }) });
 /** Wires as "from to" or "from to mm2". */
@@ -155,6 +159,53 @@ describe('Level: one room', () => {
     const r = powerOn(m2, room(20, 2.5));
     expect(r.stars).toBe(2);
     expect(r.tip).toMatch(/90 credits against a budget of 80/);
+  });
+});
+
+describe('Villa build', () => {
+  const villa = (): Level => parseLevel(JSON.parse(readFileSync(new URL('../../public/data/villa.json', import.meta.url), 'utf8')));
+  const SAFE: Record<string, [number, number]> = {
+    C1: [6, 1.5], C2: [20, 2.5], C3: [6, 1.5], C4: [20, 2.5], C5: [20, 2.5], C6: [16, 2.5], C7: [10, 1.5], C8: [16, 2.5],
+  };
+  function complete(l: Level): VillaBuild {
+    const b = newVillaBuild(l, 80, 6);
+    b.boardPlaced = true;
+    b.supplyWired = true;
+    b.solarKw = 5;
+    for (const c of l.circuits) b.rooms[c.id] = { breakerA: SAFE[c.id][0], mm2: SAFE[c.id][1] };
+    return b;
+  }
+
+  it('says what to connect next, one thing at a time', () => {
+    const l = villa();
+    const b = newVillaBuild(l, 32, 6);
+    expect(villaDesign(l, b).tip).toMatch(/Place the villa board/);
+    b.boardPlaced = true;
+    expect(villaDesign(l, b).tip).toMatch(/Wire the street supply/);
+    b.supplyWired = true;
+    expect(villaDesign(l, b).tip).toMatch(/8 rooms have no cable/);
+    for (const c of l.circuits) b.rooms[c.id].mm2 = 2.5;
+    b.rooms.C4.mm2 = null;
+    expect(villaDesign(l, b).tip).toBe('Kitchen has no cable yet. Wire the board to every room.');
+  });
+
+  it('feeds the same day simulation and scoring, and a good build earns 3 stars', () => {
+    const l = villa();
+    const { design } = villaDesign(l, complete(l));
+    expect(design!.boards[0]).toMatchObject({ breakerA: 80, solarKw: 5 });
+    expect(design!.circuits.find(c => c.id === 'C6')).toMatchObject({ breakerA: 16, cableMm2: 2.5 });
+    const card = scoreDay(design!, runDay(design!));
+    expect(card.stars).toBe(3);
+    expect(card.lessons.some(x => x.kind === 'mistake')).toBe(false);
+  });
+
+  it('gets the same honest result for a poor build, and leaves the level file untouched', () => {
+    const l = villa();
+    const b = complete(l);
+    b.rooms.C6.breakerA = 6;
+    const { design } = villaDesign(l, b);
+    expect(scoreDay(design!, runDay(design!)).lessons.map(x => x.title)).toContain('Breaker too small: Bedroom 2');
+    expect(l.circuits.find(c => c.id === 'C6')!.breakerA).toBe(10);
   });
 });
 
