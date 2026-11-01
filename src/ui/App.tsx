@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LabelMode } from '../render/labelRules';
-import { DAY_STEP_HOURS, runDay, scoreDay, type DayRun, type ScoreCard } from '../game';
+import {
+  BOARD_BREAKER_SIZES, BREAKER_SIZES, coinsEarned, DAY_STEP_HOURS, newVillaBuild, runDay, scoreDay, STARTING_COINS, type DayRun, type ScoreCard, type VillaBuild,
+} from '../game';
 import { LevelError, parseLevel, Simulator, topBoard, totalSolarKw, type Level } from '../sim';
 import { CircuitList } from './CircuitList';
 import { DesignPanel } from './DesignPanel';
@@ -8,11 +10,12 @@ import { EventLog } from './EventLog';
 import { Kpis } from './Kpis';
 import { LEVELS, WORLD_MAP, type LevelEntry } from './levels';
 import { LoadChart } from './LoadChart';
-import { isUnlocked, loadProgress, saveResult, type Best } from './progress';
+import { isUnlocked, loadProgress, loadWallet, saveResult, saveWallet, type Best } from './progress';
 import { ScorePanel } from './ScorePanel';
 import { Stage } from './Stage';
 import { TimeControls } from './TimeControls';
 import { useAnimationClock } from './useAnimationClock';
+import { VillaBuilder } from './VillaBuilder';
 import { ViewBar } from './ViewBar';
 import { WorkshopLevel } from './WorkshopLevel';
 
@@ -88,7 +91,15 @@ export function App() {
   return (
     <PlayLevel
       key={entry.id} entry={entry} level={loaded.level} picker={picker}
-      onResult={card => setProgress(saveResult(entry.id, { score: card.total, stars: card.stars }))}
+      onResult={card => {
+        const coins = coinsEarned(progress[entry.id]?.stars ?? 0, card.stars);
+        if (coins > 0) {
+          const wallet = loadWallet(STARTING_COINS);
+          saveWallet({ ...wallet, coins: wallet.coins + coins });
+        }
+        setProgress(saveResult(entry.id, { score: card.total, stars: card.stars }));
+        return coins;
+      }}
     />
   );
 }
@@ -108,11 +119,16 @@ interface PlayProps {
   entry: LevelEntry;
   level: Level;
   picker: React.ReactNode;
-  onResult: (card: ScoreCard) => void;
+  /** Saves the result and returns the coins it earned. */
+  onResult: (card: ScoreCard) => number;
 }
 
 function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
   const [design, setDesign] = useState(level);
+  // Levels with a builder start from an empty plan. The installer's wiring stays available to fix instead.
+  const [building, setBuilding] = useState(!!entry.builder);
+  const [villa, setVilla] = useState<VillaBuild>(() => newVillaBuild(level, BOARD_BREAKER_SIZES[0], BREAKER_SIZES[0]));
+  const [coins, setCoins] = useState(0);
   const [phase, setPhase] = useState<Phase>({ kind: 'design' });
   const [playing, setPlaying] = useState(false);
   const [roofOn, setRoofOn] = useState(false);
@@ -143,9 +159,11 @@ function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
     }
   });
 
-  const startRun = () => {
-    const day = runDay(design);
-    setPhase({ kind: 'run', day, card: scoreDay(design, day) });
+  const startRun = (d: Level) => {
+    const day = runDay(d);
+    setDesign(d);
+    setPhase({ kind: 'run', day, card: scoreDay(d, day) });
+    setCoins(0);
     setFrame(0);
     setPlaying(true);
   };
@@ -154,7 +172,7 @@ function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
     setPlaying(false);
     setFrame(phase.day.frames.length - 1);
     setPhase({ kind: 'score', day: phase.day, card: phase.card });
-    onResult(phase.card);
+    setCoins(onResult(phase.card));
   };
   const replay = () => {
     if (phase.kind !== 'score') return;
@@ -199,7 +217,16 @@ function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
         </p>
       </header>
       {picker}
+      {entry.builder && phase.kind === 'design' && (
+        <div className="seg build-mode" role="group" aria-label="How to work on this level">
+          <button type="button" aria-pressed={building} onClick={() => setBuilding(true)}>Build it yourself</button>
+          <button type="button" aria-pressed={!building} onClick={() => { setDesign(level); setBuilding(false); }}>Fix the installer’s wiring</button>
+        </div>
+      )}
 
+      {building && phase.kind === 'design' ? (
+        <VillaBuilder level={level} build={villa} onChange={setVilla} onPowerOn={startRun} />
+      ) : (
       <section className="sim">
         <div className="stage-col">
           <div className="stage-wrap">
@@ -224,12 +251,13 @@ function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
 
         <div className="side">
           {phase.kind === 'design' && (
-            <DesignPanel design={design} onChange={setDesign} onRestore={() => setDesign(level)} onRun={startRun} />
+            <DesignPanel design={design} onChange={setDesign} onRestore={() => setDesign(level)} onRun={() => startRun(design)} />
           )}
           {phase.kind === 'run' && <EventLog events={phase.day.events} hour={result.hour} />}
-          {phase.kind === 'score' && <ScorePanel card={phase.card} onFix={backToDesign} onReplay={replay} />}
+          {phase.kind === 'score' && <ScorePanel card={phase.card} coins={coins} onFix={backToDesign} onReplay={replay} />}
         </div>
       </section>
+      )}
     </main>
   );
 }

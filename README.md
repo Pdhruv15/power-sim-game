@@ -53,6 +53,12 @@ board lights up as levels are won.
 
 ## How to play (Level 3)
 
+**Build it yourself** is the default: place the villa board, wire it to the street, then run a cable to each room and pick
+its breaker. At this size one wire stands for each run, because wiring every return path by hand is busywork. Power On runs
+the finished build through the same day simulation and scoring as every other design level. Each level pays coins for new stars.
+
+**Fix the installer's wiring** starts from the wired villa instead:
+
 The villa was wired with a few mistakes. Your job is to find and fix them.
 
 1. **Design.** Pick a breaker and cable for each room, the main breaker and the solar size. Learn mode shows

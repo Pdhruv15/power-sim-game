@@ -27,10 +27,92 @@ const runAndSkip = () => {
   fireEvent.click(screen.getByRole('button', { name: 'Skip to result' }));
 };
 
+/** One villa opens on its empty plan. These tests fix the installer's wiring instead. */
+const openInstallerWiring = async () => {
+  fireEvent.click(await screen.findByRole('button', { name: 'Fix the installer’s wiring' }));
+  await screen.findByRole('button', { name: 'Run the day' });
+};
+
+describe('Building the villa', () => {
+  const click = (id: string) => fireEvent.click(document.getElementById(id)!);
+  const wire = (from: string, to: string) => { click(from); click(to); };
+  const SAFE: Record<string, [string, string]> = {
+    C1: ['6', '1.5'], C2: ['20', '2.5'], C3: ['6', '1.5'], C4: ['20', '2.5'], C5: ['20', '2.5'], C6: ['16', '2.5'], C7: ['10', '1.5'], C8: ['16', '2.5'],
+  };
+  const wireRooms = () => Object.entries(SAFE).forEach(([id, [breaker, cable]]) => {
+    pick(`brk-${id}`, breaker);
+    click(`cable-${cable}`);
+    wire('term-board-out', `term-${id}`);
+  });
+  const coins = () => (JSON.parse(localStorage.getItem('power-sim:wallet:v1') ?? '{"coins":20}') as { coins: number }).coins;
+
+  it('starts empty, and says what is missing until every room is wired', async () => {
+    render(<App />);
+    await screen.findByText('0 of 8 rooms wired');
+    expect(screen.queryByRole('button', { name: 'Run the day' })).toBeNull();
+    click('power-on');
+    expect(screen.getByRole('status').textContent).toMatch(/Place the villa board/);
+    click('tray-villa-board');
+    click('power-on');
+    expect(screen.getByRole('status').textContent).toMatch(/Wire the street supply/);
+    wire('term-street', 'term-board-in');
+    click('power-on');
+    expect(screen.getByRole('status').textContent).toMatch(/8 rooms have no cable/);
+  });
+
+  it('runs a finished build through the real day, pays coins, and keeps the build to fix', async () => {
+    render(<App />);
+    await screen.findByText('0 of 8 rooms wired');
+    click('tray-villa-board');
+    wire('term-street', 'term-board-in');
+    wireRooms();
+    pick('main-breaker', '80');
+    pick('solar', '5');
+    expect(screen.getByText('8 of 8 rooms wired')).toBeTruthy();
+    expect(screen.getByText(/credits/).textContent).toMatch(/\/ 1100 credits/);
+
+    click('power-on');
+    expect(screen.getByText('Load through the day')).toBeTruthy(); // the normal day replay
+    fireEvent.click(screen.getByRole('button', { name: 'Skip to result' }));
+    expect(scorePanel().getByLabelText('3 of 3 stars')).toBeTruthy();
+    expect(scorePanel().getByText('+60 coins')).toBeTruthy();
+    expect(coins()).toBe(80);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fix the design' }));
+    expect(screen.getByText('8 of 8 rooms wired')).toBeTruthy();
+    expect((document.getElementById('main-breaker') as HTMLSelectElement).value).toBe('80');
+  });
+
+  it('rejects a wire that does nothing, and removes a selected one', async () => {
+    render(<App />);
+    await screen.findByText('0 of 8 rooms wired');
+    click('tray-villa-board');
+    wire('term-street', 'term-C1');
+    expect(screen.getByRole('status').textContent).toMatch(/does nothing here/);
+    wire('term-board-out', 'term-C1');
+    expect(screen.getByText('1 of 8 rooms wired')).toBeTruthy();
+    fireEvent.pointerDown(screen.getByRole('button', { name: /Majlis cable/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the wire' }));
+    expect(screen.getByText('0 of 8 rooms wired')).toBeTruthy();
+  });
+
+  it('pays coins on the other design levels too, once per star', async () => {
+    render(<App />);
+    await openInstallerWiring();
+    runAndSkip();
+    expect(scorePanel().getByText('+20 coins')).toBeTruthy(); // 1 star
+    expect(coins()).toBe(40);
+    fireEvent.click(screen.getByRole('button', { name: 'Fix the design' }));
+    runAndSkip();
+    expect(scorePanel().queryByText(/\+\d+ coins/)).toBeNull();
+    expect(coins()).toBe(40);
+  });
+});
+
 describe('Level 1 flow', () => {
   it('runs the day, shows the mistakes, and gives 3 stars once fixed', async () => {
     render(<App />);
-    await screen.findByRole('button', { name: 'Run the day' });
+    await openInstallerWiring();
     expect(await screen.findByText(/3D view could not start/)).toBeTruthy();
     expect(screen.getByText(/needs up to 11.6 A at 15:00/)).toBeTruthy();
 
@@ -57,7 +139,7 @@ describe('Level 1 flow', () => {
 
   it('shows the load chart only once the day has run, with a readout and an hourly table', async () => {
     render(<App />);
-    await screen.findByRole('button', { name: 'Run the day' });
+    await openInstallerWiring();
     expect(screen.queryByText('Load through the day')).toBeNull();
 
     // At the start of the replay the chart is up, but has not drawn the day or its trips yet
@@ -83,7 +165,7 @@ describe('Level 1 flow', () => {
 
   it('opens Two villas once One villa has a star', async () => {
     render(<App />);
-    await screen.findByRole('button', { name: 'Run the day' });
+    await openInstallerWiring();
     const level2 = screen.getByRole('button', { name: /Level 4/ }) as HTMLButtonElement;
     expect(level2.disabled).toBe(true);
 
@@ -144,6 +226,7 @@ describe('Level 1 flow', () => {
     render(<App />);
     await screen.findByRole('button', { name: 'Run the day' });
     fireEvent.click(screen.getByRole('button', { name: /Level 3/ }));
+    await openInstallerWiring();
     const labels = within(await screen.findByRole('group', { name: 'Labels' }));
     expect(labels.getByRole('button', { name: 'Smart' }).getAttribute('aria-pressed')).toBe('true');
     fireEvent.click(labels.getByRole('button', { name: 'All' }));

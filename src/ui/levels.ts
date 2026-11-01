@@ -5,12 +5,14 @@ export interface LevelEntry {
   title: string;
   /** Level file for a design level. Workshop levels are built from src/game/workshop.ts instead. */
   file?: string;
+  /** A design level the player builds from an empty plan, before tuning the installer's wiring. */
+  builder?: boolean;
 }
 
 export const LEVELS: readonly LevelEntry[] = [
   { id: 'level-circuit', number: 1, title: 'Single circuit' },
   { id: 'level-room', number: 2, title: 'One room' },
-  { id: 'level-1-villa', number: 3, title: 'One villa', file: 'data/villa.json' },
+  { id: 'level-1-villa', number: 3, title: 'One villa', file: 'data/villa.json', builder: true },
   { id: 'level-2-two-villas', number: 4, title: 'Two villas', file: 'data/two-villas.json' },
   { id: 'level-3-building', number: 5, title: 'Apartment building', file: 'data/building.json' },
   { id: 'level-4-village', number: 6, title: 'Village', file: 'data/village.json' },
