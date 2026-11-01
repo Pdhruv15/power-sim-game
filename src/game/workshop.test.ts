@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { parseLevel, type Level } from '../sim';
+import { parseLevel, type Level, type Phase } from '../sim';
 import { runDay } from './runDay';
 import { scoreDay } from './score';
-import { buildCost, coinsEarned, MISSIONS, newVillaBuild, powerOn, villaDesign, type Build, type PartKind, type PlacedPart, type VillaBuild } from './workshop';
+import { buildCost, coinsEarned, MISSIONS, newSiteBuild, powerOn, siteDesign, type Build, type PartKind, type PlacedPart, type SiteBuild } from './workshop';
 
 const part = (id: string, kind: PartKind, breakerA?: number): PlacedPart => ({ id, kind, x: 0, y: 0, ...(breakerA && { breakerA }) });
 /** Wires as "from to" or "from to mm2". */
@@ -167,31 +167,31 @@ describe('Villa build', () => {
   const SAFE: Record<string, [number, number]> = {
     C1: [6, 1.5], C2: [20, 2.5], C3: [6, 1.5], C4: [20, 2.5], C5: [20, 2.5], C6: [16, 2.5], C7: [10, 1.5], C8: [16, 2.5],
   };
-  function complete(l: Level): VillaBuild {
-    const b = newVillaBuild(l, 80, 6);
-    b.boardPlaced = true;
+  function complete(l: Level): SiteBuild {
+    const b = newSiteBuild(l, 80, 6);
+    b.boards.DB.placed = true;
     b.supplyWired = true;
     b.solarKw = 5;
-    for (const c of l.circuits) b.rooms[c.id] = { breakerA: SAFE[c.id][0], mm2: SAFE[c.id][1] };
+    for (const c of l.circuits) b.rooms[c.id] = { breakerA: SAFE[c.id][0], mm2: SAFE[c.id][1], phase: 'L1' };
     return b;
   }
 
   it('says what to connect next, one thing at a time', () => {
     const l = villa();
-    const b = newVillaBuild(l, 32, 6);
-    expect(villaDesign(l, b).tip).toMatch(/Place the villa board/);
-    b.boardPlaced = true;
-    expect(villaDesign(l, b).tip).toMatch(/Wire the street supply/);
+    const b = newSiteBuild(l, 32, 6);
+    expect(siteDesign(l, b).tip).toMatch(/Place the Villa DB/);
+    b.boards.DB.placed = true;
+    expect(siteDesign(l, b).tip).toMatch(/Wire the street supply/);
     b.supplyWired = true;
-    expect(villaDesign(l, b).tip).toMatch(/8 rooms have no cable/);
+    expect(siteDesign(l, b).tip).toMatch(/8 rooms have no cable/);
     for (const c of l.circuits) b.rooms[c.id].mm2 = 2.5;
     b.rooms.C4.mm2 = null;
-    expect(villaDesign(l, b).tip).toBe('Kitchen has no cable yet. Wire the board to every room.');
+    expect(siteDesign(l, b).tip).toBe('Kitchen has no cable yet. Wire each board to its rooms.');
   });
 
   it('feeds the same day simulation and scoring, and a good build earns 3 stars', () => {
     const l = villa();
-    const { design } = villaDesign(l, complete(l));
+    const { design } = siteDesign(l, complete(l));
     expect(design!.boards[0]).toMatchObject({ breakerA: 80, solarKw: 5 });
     expect(design!.circuits.find(c => c.id === 'C6')).toMatchObject({ breakerA: 16, cableMm2: 2.5 });
     const card = scoreDay(design!, runDay(design!));
@@ -203,9 +203,59 @@ describe('Villa build', () => {
     const l = villa();
     const b = complete(l);
     b.rooms.C6.breakerA = 6;
-    const { design } = villaDesign(l, b);
+    const { design } = siteDesign(l, b);
     expect(scoreDay(design!, runDay(design!)).lessons.map(x => x.title)).toContain('Breaker too small: Bedroom 2');
     expect(l.circuits.find(c => c.id === 'C6')!.breakerA).toBe(10);
+  });
+});
+
+describe('Street build (two villas)', () => {
+  const street = (): Level => parseLevel(JSON.parse(readFileSync(new URL('../../public/data/two-villas.json', import.meta.url), 'utf8')));
+  const SPREAD: Record<string, Phase> = { 1: 'L1', 5: 'L1', 2: 'L2', 6: 'L2', 3: 'L3', 4: 'L3' };
+  function complete(l: Level): SiteBuild {
+    const b = newSiteBuild(l, 32, 6);
+    b.supplyWired = true;
+    b.boards.FP = { placed: true, breakerA: 100, mm2: null };
+    b.boards.VA = { placed: true, breakerA: 63, mm2: 16 };
+    b.boards.VB = { placed: true, breakerA: 40, mm2: 10 };
+    for (const c of l.circuits) b.rooms[c.id] = { breakerA: c.breakerA, mm2: c.cableMm2, phase: SPREAD[c.id.slice(1)] };
+    return b;
+  }
+
+  it('asks for each board and feeder in turn', () => {
+    const l = street();
+    const b = newSiteBuild(l, 32, 6);
+    expect(siteDesign(l, b).tip).toMatch(/Place the Feeder pillar/);
+    b.boards.FP.placed = true;
+    expect(siteDesign(l, b).tip).toMatch(/Place the Villa A/);
+    b.boards.VA.placed = b.boards.VB.placed = true;
+    b.supplyWired = true;
+    expect(siteDesign(l, b).tip).toBe('Villa A has no feeder cable yet. Wire it from the board above it.');
+  });
+
+  it('gives full marks for spread phases and safe feeders', () => {
+    const l = street();
+    const { design } = siteDesign(l, complete(l));
+    expect(design!.boards.find(x => x.id === 'VB')!.cable).toEqual({ mm2: 10, lengthM: 85 }); // the length stays the level's
+    const card = scoreDay(design!, runDay(design!));
+    expect(card.total).toBe(1000);
+    expect(card.stars).toBe(3);
+  });
+
+  it('shows the phase lesson when every room is left on L1', () => {
+    const l = street();
+    const b = complete(l);
+    for (const id of Object.keys(b.rooms)) b.rooms[id].phase = 'L1';
+    const { design } = siteDesign(l, b);
+    expect(scoreDay(design!, runDay(design!)).lessons.map(x => x.title)).toContain('Phases unbalanced: Villa A');
+  });
+
+  it('flags a feeder breaker bigger than its cable', () => {
+    const l = street();
+    const b = complete(l);
+    b.boards.VB.breakerA = 63;
+    const { design } = siteDesign(l, b);
+    expect(scoreDay(design!, runDay(design!)).lessons.map(x => x.title)).toContain('Breaker bigger than the feeder cable: Villa B');
   });
 });
 

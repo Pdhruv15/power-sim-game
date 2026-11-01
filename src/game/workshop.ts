@@ -1,4 +1,4 @@
-import { BANDS, cableAmps, INSTANT_TRIP, joinedPoints, NEW_BREAKER, solveCircuit, stepBreaker, topBoard, type Level, type Resistor } from '../sim';
+import { BANDS, cableAmps, INSTANT_TRIP, joinedPoints, NEW_BREAKER, solveCircuit, stepBreaker, topBoard, type Level, type Phase, type Resistor } from '../sim';
 import { breakerPrice, cablePrice } from './catalog';
 import { fmt } from './format';
 
@@ -317,45 +317,54 @@ function testRoom(m: Mission, b: Build): PowerOnReport {
 }
 
 /**
- * A villa the player builds from the street: a board, then a cable and a breaker to each room.
- * At this size wiring every return path by hand is busywork, so one wire stands for each run.
+ * A site the player builds from the street: boards in the level's tree, a feeder cable to each board below
+ * the top one, then a cable and a breaker to each room. At this size wiring every return path by hand
+ * is busywork, so one wire stands for each run.
  */
-export interface VillaBuild {
-  boardPlaced: boolean;
-  /** The street supply is wired to the board. */
+export interface SiteBuild {
+  /** The street supply is wired to the top board. */
   supplyWired: boolean;
-  mainBreakerA: number;
   solarKw: number;
-  /** Per room: its breaker, and the size of its cable once it is wired. */
-  rooms: Record<string, { breakerA: number; mm2: number | null }>;
+  /** Per board: placed yet, its breaker, and its feeder cable once it is wired. */
+  boards: Record<string, { placed: boolean; breakerA: number; mm2: number | null }>;
+  /** Per room: its breaker, its phase, and the size of its cable once it is wired. */
+  rooms: Record<string, { breakerA: number; phase: Phase; mm2: number | null }>;
 }
 
-/** An empty villa: nothing wired, and the smallest breakers, as they come out of the box. */
-export function newVillaBuild(level: Level, mainBreakerA: number, roomBreakerA: number): VillaBuild {
+/** An empty site: nothing wired, and the smallest breakers, as they come out of the box. */
+export function newSiteBuild(level: Level, boardBreakerA: number, roomBreakerA: number): SiteBuild {
   return {
-    boardPlaced: false, supplyWired: false, mainBreakerA, solarKw: 0,
-    rooms: Object.fromEntries(level.circuits.map(c => [c.id, { breakerA: roomBreakerA, mm2: null }])),
+    supplyWired: false, solarKw: 0,
+    boards: Object.fromEntries(level.boards.map(b => [b.id, { placed: false, breakerA: boardBreakerA, mm2: null }])),
+    rooms: Object.fromEntries(level.circuits.map(c => [c.id, { breakerA: roomBreakerA, phase: 'L1' as Phase, mm2: null }])),
   };
 }
 
 /**
- * Turn a finished villa build into a design the day simulation can run.
+ * Turn a finished build into a design the day simulation can run.
  * It needs every connection first, and until then it says what is missing.
  */
-export function villaDesign(level: Level, b: VillaBuild): { design: Level; tip: null } | { design: null; tip: string } {
-  if (!b.boardPlaced) return { design: null, tip: 'Place the villa board first. Every room gets its power from there.' };
-  if (!b.supplyWired) return { design: null, tip: 'Wire the street supply to the board, so power can reach the house.' };
+export function siteDesign(level: Level, b: SiteBuild): { design: Level; tip: null } | { design: null; tip: string } {
+  const unplaced = level.boards.find(x => !b.boards[x.id]?.placed);
+  if (unplaced) return { design: null, tip: `Place the ${unplaced.name} first. The rooms get their power through it.` };
+  const top = topBoard(level);
+  if (!b.supplyWired) return { design: null, tip: `Wire the street supply to the ${top.name}, so power can reach the site.` };
+  const unfed = level.boards.find(x => x.parent !== null && b.boards[x.id].mm2 == null);
+  if (unfed) return { design: null, tip: `${unfed.name} has no feeder cable yet. Wire it from the board above it.` };
   const dark = level.circuits.filter(c => b.rooms[c.id]?.mm2 == null);
   if (dark.length) {
-    return { design: null, tip: `${dark.length === 1 ? `${dark[0].room} has` : `${dark.length} rooms have`} no cable yet. Wire the board to every room.` };
+    return { design: null, tip: `${dark.length === 1 ? `${dark[0].room} has` : `${dark.length} rooms have`} no cable yet. Wire each board to its rooms.` };
   }
-  const top = topBoard(level).id;
   return {
     tip: null,
     design: {
       ...level,
-      boards: level.boards.map(x => (x.id === top ? { ...x, breakerA: b.mainBreakerA, solarKw: b.solarKw } : x)),
-      circuits: level.circuits.map(c => ({ ...c, breakerA: b.rooms[c.id].breakerA, cableMm2: b.rooms[c.id].mm2! })),
+      boards: level.boards.map(x => ({
+        ...x, breakerA: b.boards[x.id].breakerA,
+        ...(x.id === top.id && { solarKw: b.solarKw }),
+        ...(x.cable && { cable: { ...x.cable, mm2: b.boards[x.id].mm2! } }),
+      })),
+      circuits: level.circuits.map(c => ({ ...c, breakerA: b.rooms[c.id].breakerA, cableMm2: b.rooms[c.id].mm2!, phase: b.rooms[c.id].phase })),
     },
   };
 }

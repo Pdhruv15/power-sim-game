@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LabelMode } from '../render/labelRules';
 import {
-  BOARD_BREAKER_SIZES, BREAKER_SIZES, coinsEarned, DAY_STEP_HOURS, newVillaBuild, runDay, scoreDay, STARTING_COINS, type DayRun, type ScoreCard, type VillaBuild,
+  BOARD_BREAKER_SIZES, BREAKER_SIZES, coinsEarned, DAY_STEP_HOURS, newSiteBuild, runDay, scoreDay, STARTING_COINS, type DayRun, type ScoreCard, type SiteBuild,
 } from '../game';
 import { LevelError, parseLevel, Simulator, topBoard, totalSolarKw, type Level } from '../sim';
 import { CircuitList } from './CircuitList';
@@ -14,8 +14,8 @@ import { isUnlocked, loadProgress, loadWallet, saveResult, saveWallet, type Best
 import { ScorePanel } from './ScorePanel';
 import { Stage } from './Stage';
 import { TimeControls } from './TimeControls';
+import { SiteBuilder } from './SiteBuilder';
 import { useAnimationClock } from './useAnimationClock';
-import { VillaBuilder } from './VillaBuilder';
 import { ViewBar } from './ViewBar';
 import { WorkshopLevel } from './WorkshopLevel';
 
@@ -126,8 +126,8 @@ interface PlayProps {
 function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
   const [design, setDesign] = useState(level);
   // Levels with a builder start from an empty plan. The installer's wiring stays available to fix instead.
-  const [building, setBuilding] = useState(!!entry.builder);
-  const [villa, setVilla] = useState<VillaBuild>(() => newVillaBuild(level, BOARD_BREAKER_SIZES[0], BREAKER_SIZES[0]));
+  const [building, setBuilding] = useState(!!entry.buildGoal);
+  const [site, setSite] = useState<SiteBuild>(() => newSiteBuild(level, BOARD_BREAKER_SIZES[0], BREAKER_SIZES[0]));
   const [coins, setCoins] = useState(0);
   const [phase, setPhase] = useState<Phase>({ kind: 'design' });
   const [playing, setPlaying] = useState(false);
@@ -217,15 +217,15 @@ function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
         </p>
       </header>
       {picker}
-      {entry.builder && phase.kind === 'design' && (
+      {entry.buildGoal && phase.kind === 'design' && (
         <div className="seg build-mode" role="group" aria-label="How to work on this level">
           <button type="button" aria-pressed={building} onClick={() => setBuilding(true)}>Build it yourself</button>
           <button type="button" aria-pressed={!building} onClick={() => { setDesign(level); setBuilding(false); }}>Fix the installer’s wiring</button>
         </div>
       )}
 
-      {building && phase.kind === 'design' ? (
-        <VillaBuilder level={level} build={villa} onChange={setVilla} onPowerOn={startRun} />
+      {building && entry.buildGoal && phase.kind === 'design' ? (
+        <SiteBuilder level={level} goal={entry.buildGoal} build={site} onChange={setSite} onPowerOn={startRun} />
       ) : (
       <section className="sim">
         <div className="stage-col">

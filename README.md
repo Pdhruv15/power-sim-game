@@ -88,6 +88,8 @@ attention plus the room under the pointer, *All* shows every room, and *Off* hid
 
 ## Level 4
 
+Also built from an empty plan by default, now with phases and feeder cables to choose. The installer's wiring is still one click away.
+
 Two villas share a three-phase supply from a feeder pillar. Every room starts on L1, and Villa B is 85 m away on a feeder
 cable that is too small for its breaker. Spread the rooms over L1, L2 and L3 (the design panel shows each board's
 phase currents at its busiest time), size the feeders, and keep every room within 5 % of the supply voltage.
