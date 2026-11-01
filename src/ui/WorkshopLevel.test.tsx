@@ -105,6 +105,37 @@ describe('Level 1: single circuit', () => {
     expect(document.querySelectorAll('.wire')).toHaveLength(0);
   });
 
+  it('makes a wire by dragging between two circles, with a preview, and marks both as connected', () => {
+    render(<App />);
+    place();
+    expect(screen.getByText(/Drag from one circle to another/)).toBeTruthy();
+    const from = document.getElementById('term-battery1-a')!, to = document.getElementById('term-switch2-a')!;
+    document.elementFromPoint = () => to;
+
+    fireEvent(from, new MouseEvent('pointerdown', { bubbles: true, clientX: 10, clientY: 10 }));
+    fireEvent(window, new MouseEvent('pointermove', { clientX: 100, clientY: 40 }));
+    expect(document.querySelector('.wire-preview')).toBeTruthy();
+    fireEvent(window, new MouseEvent('pointerup', { clientX: 200, clientY: 40 }));
+
+    expect(document.querySelector('.wire-preview')).toBeNull();
+    expect(document.querySelectorAll('.wire')).toHaveLength(1);
+    expect(from.className).toContain('wired');
+    expect(to.className).toContain('wired');
+    expect(document.querySelector('.term.pending')).toBeNull();
+    expect(screen.queryByText(/Drag from one circle to another/)).toBeNull();
+  });
+
+  it('makes no wire when a drag ends away from any circle', () => {
+    render(<App />);
+    place();
+    document.elementFromPoint = () => document.querySelector('.board');
+    fireEvent(document.getElementById('term-battery1-a')!, new MouseEvent('pointerdown', { bubbles: true, clientX: 10, clientY: 10 }));
+    fireEvent(window, new MouseEvent('pointermove', { clientX: 100, clientY: 40 }));
+    fireEvent(window, new MouseEvent('pointerup', { clientX: 100, clientY: 40 }));
+    expect(document.querySelectorAll('.wire')).toHaveLength(0);
+    expect(document.querySelector('.term.pending')).toBeNull();
+  });
+
   it('moves a part with the keyboard', () => {
     render(<App />);
     click('tray-lamp');
