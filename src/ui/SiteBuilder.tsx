@@ -4,7 +4,7 @@ import {
 } from '../game';
 import { CABLE_SIZES, cableAmps, PHASES, type Board, type Level, type Phase } from '../sim';
 import { fmt, hhmm } from './format';
-import { PartIcon, roomIcon, TERM_TITLES } from './PartIcon';
+import { loadIcon, PartIcon, TERM_TITLES } from './PartIcon';
 import { trackDrag } from './trackDrag';
 import { TERMINAL_ATTR, useWireDrag } from './useWireDrag';
 import { draftPath, drawWires, routeWires, type WireEnd } from './wireRoute';
@@ -18,6 +18,10 @@ const ROOM_GAP_Y = 12;
 /** Boards stay left of the rooms, leaving a channel for the wires. */
 const PANEL_MIN_X = 130, PANEL_MAX_X = ROOM_COLS[0] - PANEL_W - 52;
 const DEFAULT_CABLE = 2.5;
+const MIN_SHEET_H = 300;
+const SHEET_BOARD_X = 200;
+/** With no rooms on it, the plan has the whole width for its boards. */
+const PLAN_TOP_X = 180, PLAN_BELOW_X = 460, PLAN_MAX_X = BOARD_W - PANEL_W - 40;
 
 const STREET_OUT = 'street';
 const boardIn = (id: string) => `in.${id}`;
@@ -40,14 +44,20 @@ interface Props {
 
 /** Build a site from the street: place each board, wire the tree down to every room, and pick the sizes. */
 export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) {
-  const rows = Math.ceil(level.circuits.length / ROOM_COLS.length);
-  const boardH = Math.max(rows * (ROOM_H + ROOM_GAP_Y) + ROOM_GAP_Y, 300);
   const top = level.boards.find(b => b.parent === null)!;
   const below = level.boards.filter(b => b.parent !== null);
+  // With boards below the top one, the plan shows the boards, and each board's rooms open on a sheet of their own
+  const hasSheets = below.length > 0;
+  const [sheet, setSheet] = useState<string | null>(null);
+  const sheetBoard = level.boards.find(b => b.id === sheet);
+  const rooms = sheet ? level.circuits.filter(c => c.board === sheet) : hasSheets ? [] : level.circuits;
+  const rows = Math.ceil(rooms.length / ROOM_COLS.length);
+  const boardH = Math.max(rows * (ROOM_H + ROOM_GAP_Y) + ROOM_GAP_Y, MIN_SHEET_H);
+  const shownBoards = sheetBoard ? [sheetBoard] : level.boards;
   const [spots, setSpots] = useState<Record<string, { x: number; y: number }>>(() => Object.fromEntries(level.boards.map(b => {
-    if (b.parent === null) return [b.id, { x: below.length ? 136 : 200, y: boardH / 2 - PANEL_H / 2 }];
+    if (b.parent === null) return [b.id, { x: below.length ? PLAN_TOP_X : SHEET_BOARD_X, y: boardH / 2 - PANEL_H / 2 }];
     const i = below.indexOf(b);
-    return [b.id, { x: PANEL_MAX_X, y: ((i + 0.5) / below.length) * boardH - PANEL_H / 2 }];
+    return [b.id, { x: PLAN_BELOW_X, y: ((i + 0.5) / below.length) * boardH - PANEL_H / 2 }];
   })));
   const [pending, setPending] = useState<string | null>(null);
   const [cable, setCable] = useState(DEFAULT_CABLE);
@@ -77,8 +87,11 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
   const setRoom = (id: string, patch: Partial<SiteBuild['rooms'][string]>) =>
     update({ rooms: { ...build.rooms, [id]: { ...build.rooms[id], ...patch } } });
 
+  const openSheet = (id: string | null) => { setSheet(id); setSelected(null); setPending(null); setTip(null); };
+  const spotOf = (id: string) => (id === sheet ? { x: SHEET_BOARD_X, y: boardH / 2 - PANEL_H / 2 } : spots[id]);
+
   const moveBoard = (id: string, x: number, y: number) =>
-    setSpots(s => ({ ...s, [id]: { x: clamp(x, PANEL_MIN_X, PANEL_MAX_X), y: clamp(y, 0, boardH - PANEL_H) } }));
+    setSpots(s => ({ ...s, [id]: { x: clamp(x, PANEL_MIN_X, hasSheets ? PLAN_MAX_X : PANEL_MAX_X), y: clamp(y, 0, boardH - PANEL_H) } }));
 
   /** Lifting a board takes every wire touching it with it. */
   const removeBoard = (id: string) => {
@@ -159,20 +172,20 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
     trackDrag(e, (x, y) => moveBoard(id, x - dx, y - dy), () => {});
   };
 
-  const inAt = (id: string): WireEnd => ({ x: spots[id].x, y: spots[id].y + PANEL_H / 2, dir: -1 });
-  const outAt = (id: string): WireEnd => ({ x: spots[id].x + PANEL_W, y: spots[id].y + PANEL_H / 2, dir: 1 });
+  const inAt = (id: string): WireEnd => ({ x: spotOf(id).x, y: spotOf(id).y + PANEL_H / 2, dir: -1 });
+  const outAt = (id: string): WireEnd => ({ x: spotOf(id).x + PANEL_W, y: spotOf(id).y + PANEL_H / 2, dir: 1 });
   const routes = useMemo(() => {
-    const placed = level.boards.filter(b => build.boards[b.id].placed);
+    const placed = shownBoards.filter(b => build.boards[b.id].placed);
     const boxes = [
-      { left: street.x, right: street.x + STREET.w, top: street.y, bottom: street.y + STREET.h },
-      ...placed.map(b => ({ left: spots[b.id].x, right: spots[b.id].x + PANEL_W, top: spots[b.id].y, bottom: spots[b.id].y + PANEL_H })),
-      ...level.circuits.map((_, i) => { const at = roomAt(i); return { left: at.x, right: at.x + ROOM_W, top: at.y, bottom: at.y + ROOM_H }; }),
+      ...(sheet ? [] : [{ left: street.x, right: street.x + STREET.w, top: street.y, bottom: street.y + STREET.h }]),
+      ...placed.map(b => ({ left: spotOf(b.id).x, right: spotOf(b.id).x + PANEL_W, top: spotOf(b.id).y, bottom: spotOf(b.id).y + PANEL_H })),
+      ...rooms.map((_, i) => { const at = roomAt(i); return { left: at.x, right: at.x + ROOM_W, top: at.y, bottom: at.y + ROOM_H }; }),
     ];
     const jobs = [
-      ...(build.supplyWired ? [{ id: STREET_OUT, from: STREET_OUT, to: boardIn(top.id), a: { x: street.x + STREET.w, y: street.y + STREET.h / 2, dir: 1 as const }, b: inAt(top.id) }] : []),
-      ...below.filter(b => build.boards[b.id].mm2 != null)
+      ...(build.supplyWired && !sheet ? [{ id: STREET_OUT, from: STREET_OUT, to: boardIn(top.id), a: { x: street.x + STREET.w, y: street.y + STREET.h / 2, dir: 1 as const }, b: inAt(top.id) }] : []),
+      ...below.filter(b => !sheet && build.boards[b.id].mm2 != null)
         .map(b => ({ id: feederWire(b.id), from: boardOut(b.parent!), to: boardIn(b.id), a: outAt(b.parent!), b: inAt(b.id) })),
-      ...level.circuits.flatMap((c, i) => {
+      ...rooms.flatMap((c, i) => {
         if (build.rooms[c.id].mm2 == null) return [];
         const at = roomAt(i);
         return [{ id: roomIn(c.id), from: boardOut(c.board), to: roomIn(c.id), a: outAt(c.board), b: { x: at.x, y: at.y + ROOM_H / 2, dir: -1 as const } }];
@@ -181,7 +194,7 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
     return drawWires(jobs, routeWires(jobs, BOARD_W, boardH, boxes));
     // Everything else here follows from the level, which fixes the board's size and the rooms
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [level, build, spots]);
+  }, [level, build, spots, sheet]);
   const preview = useMemo(() => {
     const r = siteDesign(level, build);
     return r.design ? designCost(r.design) : null;
@@ -201,7 +214,7 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
                 key={b.id} id={`tray-${b.id}`} type="button" className="tray-item" disabled={build.boards[b.id].placed}
                 onPointerDown={e => startTrayDrag(e, b)} onClick={() => { if (!dragged.current) placeBoard(b); dragged.current = false; }}
               >
-                <PartIcon name="board" size={18} /> <b>{b.name}</b> <small>{build.boards[b.id].placed ? 'placed' : '1 left'}</small>
+                <PartIcon name="board" size={20} /> <b>{b.name}</b> <small>{build.boards[b.id].placed ? 'placed' : '1 left'}</small>
               </button>
             ))}
           </div>
@@ -214,21 +227,29 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
           </div>
         </section>
 
+        {hasSheets && (
+          <nav className="sheet-path" aria-label="Sheets">
+            {sheetBoard
+              ? <><button type="button" id="sheet-up" className="btn" onClick={() => openSheet(null)}>{level.title}</button><span aria-hidden="true">›</span><b>{sheetBoard.name}</b></>
+              : <b>{level.title}</b>}
+          </nav>
+        )}
+
         <div className="board-scroll">
           <div
             ref={area} className="board" style={{ width: BOARD_W, height: boardH }}
             onPointerDown={e => { if (e.target === e.currentTarget) { setSelected(null); setPending(null); } }}
           >
             <svg className="wires" width={BOARD_W} height={boardH} aria-hidden={wired === 0 && !build.supplyWired}>
-              {build.supplyWired && (
+              {build.supplyWired && !sheet && (
                 <SiteWire id={STREET_OUT} label={`Street to ${top.name}`} d={routes.paths.get(STREET_OUT)!} mm2={16} selected={selected === STREET_OUT} onSelect={setSelected} />
               )}
               {below.map(b => {
                 const mm2 = build.boards[b.id].mm2;
-                if (mm2 == null) return null;
+                if (mm2 == null || sheet) return null;
                 return <SiteWire key={b.id} id={feederWire(b.id)} label={`${b.name} feeder, ${mm2} mm²`} d={routes.paths.get(feederWire(b.id))!} mm2={mm2} selected={selected === feederWire(b.id)} onSelect={setSelected} />;
               })}
-              {level.circuits.map(c => {
+              {rooms.map(c => {
                 const mm2 = build.rooms[c.id].mm2;
                 if (mm2 == null) return null;
                 return <SiteWire key={c.id} id={roomIn(c.id)} label={`${c.room} cable, ${mm2} mm²`} d={routes.paths.get(roomIn(c.id))!} mm2={mm2} selected={selected === roomIn(c.id)} onSelect={setSelected} />;
@@ -237,30 +258,39 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
               {wireDraft && <path className="wire-preview" d={draftPath(wireDraft)} />}
             </svg>
 
-            {wired === 0 && !build.supplyWired && <p className="board-tip">Drag from one circle to another to add a wire.</p>}
+            {wired === 0 && !build.supplyWired && !sheet && <p className="board-tip">Drag from one circle to another to add a wire.</p>}
+            {wired === 0 && build.supplyWired && hasSheets && !sheet && <p className="board-tip left">Press Open on a board to wire its rooms.</p>}
 
-            <div className="part kind-supply" style={{ left: street.x, top: street.y, width: STREET.w, height: STREET.h }}>
-              <PartIcon name="supply" />
-              <span className="part-name">Street supply</span>
-              <button id="term-street" type="button" aria-label="Street supply" {...termProps(STREET_OUT, build.supplyWired, 'b')} />
-            </div>
+            {!sheet && (
+              <div className="part kind-supply" style={{ left: street.x, top: street.y, width: STREET.w, height: STREET.h }}>
+                <PartIcon name="supply" />
+                <span className="part-name">Street supply</span>
+                <button id="term-street" type="button" aria-label="Street supply" {...termProps(STREET_OUT, build.supplyWired, 'b')} />
+              </div>
+            )}
 
-            {level.boards.filter(b => build.boards[b.id].placed).map(b => {
+            {shownBoards.filter(b => build.boards[b.id].placed).map(b => {
               const need = needs.boards.get(b.id);
               const split = b.phases === 3 ? PHASES.map((p, i) => `${p} ${fmt(need?.phaseAmps?.[i] ?? 0, 0)}`).join(' · ') : `${fmt(need?.amps ?? 0, 0)} A`;
               const parent = level.boards.find(x => x.id === b.parent);
+              const own = level.circuits.filter(c => c.board === b.id);
+              const ownWired = own.filter(c => build.rooms[c.id].mm2 != null).length;
+              const closed = hasSheets && !sheet && own.length > 0;
+              const onSheet = b.id === sheet;
+              const at = spotOf(b.id);
               return (
                 <div
-                  key={b.id} id={`part-${b.id}`} role="group" tabIndex={0} aria-label={b.name} className={`part panel-part${selected === `board.${b.id}` ? ' sel' : ''}`}
-                  style={{ left: spots[b.id].x, top: spots[b.id].y, width: PANEL_W, height: PANEL_H }}
-                  onPointerDown={e => { setSelected(`board.${b.id}`); startMoveBoard(e, b.id); }}
+                  key={b.id} id={`part-${b.id}`} role="group" tabIndex={0} aria-label={b.name} className={`part panel-part${selected === `board.${b.id}` ? ' sel' : ''}${closed && ownWired === own.length ? ' sheet-done' : ''}`}
+                  style={{ left: at.x, top: at.y, width: PANEL_W, height: PANEL_H }}
+                  onPointerDown={e => { if (onSheet) return; setSelected(`board.${b.id}`); startMoveBoard(e, b.id); }}
+                  onDoubleClick={() => { if (closed) openSheet(b.id); }}
                   onKeyDown={e => {
+                    if (onSheet) return;
                     const step: Record<string, [number, number]> = { ArrowLeft: [-10, 0], ArrowRight: [10, 0], ArrowUp: [0, -10], ArrowDown: [0, 10] };
                     if (step[e.key]) { e.preventDefault(); moveBoard(b.id, spots[b.id].x + step[e.key][0], spots[b.id].y + step[e.key][1]); }
                   }}
                 >
-                  <PartIcon name="board" size={24} />
-                  <span className="part-name">{nameOf(b)}</span>
+                  <span className="part-title"><PartIcon name="board" size={20} /><span className="part-name">{nameOf(b)}</span></span>
                   <small className="part-state">{split}</small>
                   <select
                     id={`brk-${b.id}`} aria-label={`${b.name} breaker`} value={build.boards[b.id].breakerA}
@@ -269,6 +299,15 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
                   >
                     {BOARD_BREAKER_SIZES.map(a => <option key={a} value={a}>{a} A</option>)}
                   </select>
+                  {closed && (
+                    <span className="sheet-open">
+                      <small>{ownWired} of {own.length} wired</small>
+                      <button
+                        type="button" id={`open-${b.id}`} className="btn" aria-label={`Open ${b.name}`}
+                        onPointerDown={e => e.stopPropagation()} onClick={() => openSheet(b.id)}
+                      >Open</button>
+                    </span>
+                  )}
                   <button
                     id={`term-${b.id}-in`} type="button" aria-label={`${b.name}, ${parent ? `feed from ${parent.name}` : 'from the street'}`}
                     {...termProps(boardIn(b.id), b.parent === null ? build.supplyWired : build.boards[b.id].mm2 != null, 'a')}
@@ -281,16 +320,15 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
               );
             })}
 
-            {level.circuits.map((c, i) => {
+            {rooms.map((c, i) => {
               const at = roomAt(i);
               const need = needs.circuits.get(c.id);
               const t = roomIn(c.id);
               const board = level.boards.find(b => b.id === c.board)!;
               const room = build.rooms[c.id];
-              const owner = level.boards.length > 1 ? `${board.name} · ` : '';
               return (
-                <div key={c.id} id={`room-${c.id}`} role="group" aria-label={`${owner}${c.room}`} className="part room-part" style={{ left: at.x, top: at.y, width: ROOM_W, height: ROOM_H }}>
-                  <span className="part-title"><PartIcon name={roomIcon(c.room)} size={20} /><span className="part-name">{owner}{c.room}</span></span>
+                <div key={c.id} id={`room-${c.id}`} role="group" aria-label={c.room} className="part room-part" style={{ left: at.x, top: at.y, width: ROOM_W, height: ROOM_H }}>
+                  <span className="part-title"><PartIcon name={loadIcon(c.type)} size={22} /><span className="part-name">{c.room}</span></span>
                   <small className="part-state">up to {fmt(need?.amps ?? 0)} A at {hhmm(need?.hour ?? 0)}</small>
                   <span className="room-picks">
                     <select

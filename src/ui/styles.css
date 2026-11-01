@@ -277,7 +277,13 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .term.top .term-label { top: calc(100% + 1px); }
 .term.bottom .term-label { bottom: calc(100% + 1px); }
 .term-label b { color: var(--accent); }
-.part-icon { flex: none; color: var(--muted); }
+.part-icon { flex: none; color: #c7d2dc; }
+.board-tip.left { left: 16px; transform: none; }
+.sheet-path { display: flex; align-items: center; gap: 8px; font-size: 14px; min-height: 32px; }
+.sheet-path .btn { padding: 4px 10px; }
+.sheet-open { display: flex; align-items: center; justify-content: space-between; gap: 4px; width: 100%; font-size: 11px; color: var(--muted); }
+.sheet-open .btn { padding: 1px 8px; font-size: 11px; }
+.part.sheet-done { border-color: var(--ok); }
 .part.bus-bar { padding: 0; border-radius: 2px; border: 0; cursor: default; }
 .part.kind-breaker, .part.kind-mainswitch { padding: 3px 4px; cursor: default; }
 .part.kind-mainswitch .part-name { padding: 0 18px; }
@@ -331,7 +337,7 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .room-part .part-name, .panel-part .part-name { font-size: 12.5px; }
 .room-picks { display: flex; gap: 4px; width: 100%; }
 .room-picks select { flex: 1; min-width: 0; }
-.panel-part { padding: 3px 21px; }
+.panel-part { padding: 3px 18px; }
 .feeder-list { list-style: none; margin: 0; padding: 0; font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .rule-line { margin: 0; font-family: var(--mono); font-size: 12px; color: var(--accent); }
 .solar-pick { display: flex; flex-direction: column; gap: 2px; }

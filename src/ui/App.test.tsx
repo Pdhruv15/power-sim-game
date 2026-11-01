@@ -114,6 +114,8 @@ describe('Building two villas', () => {
   const wire = (from: string, to: string) => { click(from); click(to); };
   const SPREAD: Record<string, string> = { 1: 'L1', 5: 'L1', 2: 'L2', 6: 'L2', 3: 'L3', 4: 'L3' };
   const ROOM: Record<string, [string, string]> = { 1: ['25', '4'], 2: ['20', '2.5'], 3: ['16', '2.5'], 4: ['20', '2.5'], 5: ['10', '1.5'], 6: ['16', '2.5'] };
+  const sheet = (id: string) => click(`open-${id}`);
+  const up = () => click('sheet-up');
   const open = async () => {
     localStorage.setItem('power-sim:progress:v1', JSON.stringify({ ...STARTER_DONE, 'level-1-villa': { score: 955, stars: 3 } }));
     render(<App />);
@@ -126,6 +128,7 @@ describe('Building two villas', () => {
     click('tray-VA');
     click('tray-VB');
     expect(document.getElementById('part-VA')!.textContent).toMatch(/L1 62 · L2 0 · L3 0/);
+    sheet('VA');
     pick('ph-A2', 'L2');
     expect(document.getElementById('part-VA')!.textContent).toMatch(/L2 1[0-9]/);
     expect(screen.getByText('Villa B feeder · 85 m')).toBeTruthy();
@@ -138,9 +141,34 @@ describe('Building two villas', () => {
     click('tray-VA');
     wire('term-street', 'term-VA-in');
     expect(screen.getByRole('status').textContent).toMatch(/does nothing here/);
-    wire('term-FP-out', 'term-A1');
+    wire('term-VA-out', 'term-FP-in');
     expect(screen.getByRole('status').textContent).toMatch(/does nothing here/);
+    sheet('VA');
     wire('term-VA-out', 'term-A1');
+    expect(screen.getByText('1 of 12 rooms wired')).toBeTruthy();
+  });
+
+  it('keeps the plan to boards, and opens each one on a sheet of its own rooms', async () => {
+    await open();
+    ['FP', 'VA', 'VB'].forEach(id => click(`tray-${id}`));
+    expect(document.querySelector('.room-part')).toBeNull();
+    expect(document.getElementById('term-street')).toBeTruthy();
+    expect(document.getElementById('part-VA')!.textContent).toMatch(/0 of 6 wired/);
+
+    sheet('VA');
+    expect(document.querySelectorAll('.room-part')).toHaveLength(6);
+    expect(document.getElementById('room-A1')).toBeTruthy();
+    expect(document.getElementById('room-B1')).toBeNull();
+    expect(document.getElementById('term-street')).toBeNull();
+    expect(document.getElementById('part-VB')).toBeNull();
+    expect(screen.getByRole('navigation', { name: 'Sheets' }).textContent).toMatch(/Two villas.*Villa A/);
+
+    wire('term-VA-out', 'term-A1');
+    expect(document.querySelectorAll('.wire')).toHaveLength(1);
+    up();
+    expect(document.querySelector('.room-part')).toBeNull();
+    expect(document.getElementById('part-VA')!.textContent).toMatch(/1 of 6 wired/);
+    expect(document.querySelectorAll('.wire')).toHaveLength(0); // room wires stay on their sheet
     expect(screen.getByText('1 of 12 rooms wired')).toBeTruthy();
   });
 
@@ -156,12 +184,14 @@ describe('Building two villas', () => {
     pick('brk-VB', '40');
     wire('term-FP-out', 'term-VB-in');
     for (const v of ['A', 'B']) {
+      sheet(`V${v}`);
       for (const n of ['1', '2', '3', '4', '5', '6']) {
         pick(`brk-${v}${n}`, ROOM[n][0]);
         pick(`ph-${v}${n}`, SPREAD[n]);
         click(`cable-${ROOM[n][1]}`);
         wire(`term-V${v}-out`, `term-${v}${n}`);
       }
+      up();
     }
     click('power-on');
     fireEvent.click(screen.getByRole('button', { name: 'Skip to result' }));
@@ -177,7 +207,9 @@ describe('Building two villas', () => {
     click('tray-VA');
     wire('term-street', 'term-FP-in');
     wire('term-FP-out', 'term-VA-in');
+    sheet('VA');
     wire('term-VA-out', 'term-A1');
+    up();
     fireEvent.pointerDown(document.getElementById('part-VA')!, { clientX: 300, clientY: 100 });
     fireEvent.pointerUp(window);
     fireEvent.click(screen.getByRole('button', { name: 'Remove the board' }));
