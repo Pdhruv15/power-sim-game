@@ -5,6 +5,7 @@ import {
 import { CABLE_SIZES, cableAmps, PHASES, type Board, type Level, type Phase } from '../sim';
 import { fmt, hhmm } from './format';
 import { trackDrag } from './trackDrag';
+import { TERMINAL_ATTR, useWireDrag } from './useWireDrag';
 
 const BOARD_W = 860;
 const STREET = { x: 16, w: 100, h: 76 };
@@ -91,11 +92,9 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
   };
 
   /** A wire is only useful down the tree: street to top board, board to the boards and rooms it feeds. */
-  const clickTerminal = (t: string) => {
-    if (pending === null) { setPending(t); return; }
-    const pair = [pending, t];
+  const connect = (from: string, to: string) => {
+    const pair = [from, to];
     setPending(null);
-    if (pending === t) return;
     if (pair.includes(STREET_OUT) && pair.includes(boardIn(top.id))) { update({ supplyWired: true }); return; }
     const child = below.find(b => pair.includes(boardIn(b.id)) && pair.includes(boardOut(b.parent!)));
     if (child) { setBoard(child.id, { mm2: cable }); return; }
@@ -103,6 +102,21 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
     if (room) { setRoom(room.id, { mm2: cable }); return; }
     setTip(`That connection does nothing here. Wire the street to the ${nameOf(top).toLowerCase()}, then each board's right side to what it feeds.`);
   };
+  const { preview: wireDraft, startWireDrag, endedDrag } = useWireDrag(area, connect);
+
+  const clickTerminal = (t: string) => {
+    if (endedDrag()) return;
+    if (pending === null) { setPending(t); return; }
+    if (pending === t) setPending(null);
+    else connect(pending, t);
+  };
+  /** Everything a connection point needs: dragging from it, clicking it, and being dropped on. */
+  const termProps = (t: string, wired: boolean, end: 'a' | 'b') => ({
+    [TERMINAL_ATTR]: t,
+    className: `term ${end}${pending === t ? ' pending' : ''}${wired ? ' wired' : ''}`,
+    onPointerDown: (e: React.PointerEvent<HTMLElement>) => startWireDrag(e, t),
+    onClick: () => clickTerminal(t),
+  });
 
   const pickCable = (mm: number) => {
     setCable(mm);
@@ -195,11 +209,14 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
                 const at = roomAt(i);
                 return <SiteWire key={c.id} id={roomIn(c.id)} label={`${c.room} cable, ${mm2} mm²`} from={outAt(c.board)} to={{ x: at.x, y: at.y + ROOM_H / 2 }} mm2={mm2} selected={selected === roomIn(c.id)} onSelect={setSelected} />;
               })}
+              {wireDraft && <line className="wire-preview" x1={wireDraft.x1} y1={wireDraft.y1} x2={wireDraft.x2} y2={wireDraft.y2} />}
             </svg>
+
+            {wired === 0 && !build.supplyWired && <p className="board-tip">Drag from one circle to another to add a wire.</p>}
 
             <div className="part kind-supply" style={{ left: street.x, top: street.y, width: STREET.w, height: STREET.h }}>
               <span className="part-name">Street supply</span>
-              <button id="term-street" type="button" className={`term b${pending === STREET_OUT ? ' pending' : ''}`} aria-label="Street supply" onClick={() => clickTerminal(STREET_OUT)} />
+              <button id="term-street" type="button" aria-label="Street supply" {...termProps(STREET_OUT, build.supplyWired, 'b')} />
             </div>
 
             {level.boards.filter(b => build.boards[b.id].placed).map(b => {
@@ -225,8 +242,14 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
                   >
                     {BOARD_BREAKER_SIZES.map(a => <option key={a} value={a}>{a} A</option>)}
                   </select>
-                  <button id={`term-${b.id}-in`} type="button" className={`term a${pending === boardIn(b.id) ? ' pending' : ''}`} aria-label={`${b.name}, ${parent ? `feed from ${parent.name}` : 'from the street'}`} onPointerDown={e => e.stopPropagation()} onClick={() => clickTerminal(boardIn(b.id))} />
-                  <button id={`term-${b.id}-out`} type="button" className={`term b${pending === boardOut(b.id) ? ' pending' : ''}`} aria-label={`${b.name}, feeds out`} onPointerDown={e => e.stopPropagation()} onClick={() => clickTerminal(boardOut(b.id))} />
+                  <button
+                    id={`term-${b.id}-in`} type="button" aria-label={`${b.name}, ${parent ? `feed from ${parent.name}` : 'from the street'}`}
+                    {...termProps(boardIn(b.id), b.parent === null ? build.supplyWired : build.boards[b.id].mm2 != null, 'a')}
+                  />
+                  <button
+                    id={`term-${b.id}-out`} type="button" aria-label={`${b.name}, feeds out`}
+                    {...termProps(boardOut(b.id), below.some(x => x.parent === b.id && build.boards[x.id].mm2 != null) || level.circuits.some(c => c.board === b.id && build.rooms[c.id].mm2 != null), 'b')}
+                  />
                 </div>
               );
             })}
@@ -255,7 +278,7 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
                       </select>
                     )}
                   </span>
-                  <button id={`term-${c.id}`} type="button" className={`term a${pending === t ? ' pending' : ''}`} aria-label={`${c.room}, cable in`} onClick={() => clickTerminal(t)} />
+                  <button id={`term-${c.id}`} type="button" aria-label={`${c.room}, cable in`} {...termProps(t, room.mm2 != null, 'a')} />
                 </div>
               );
             })}
@@ -264,7 +287,7 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
 
         <div className="controls workshop-controls">
           <button type="button" id="power-on" className="btn primary power-on" onClick={pressPowerOn}>Power On</button>
-          <span className="hint-now">{pending ? 'Now click where this wire goes.' : 'Click two connection points to join them. New wires use the cable picked above.'}</span>
+          <span className="hint-now">{pending ? 'Now click where this wire goes.' : 'Drag between two circles to add a wire, or click one, then the other. New wires use the cable picked above.'}</span>
           {selectedBoard
             ? <button type="button" className="btn" onClick={() => removeBoard(selectedBoard.id)}>Remove the board</button>
             : selected && <button type="button" className="btn" onClick={removeWire}>Remove the wire</button>}

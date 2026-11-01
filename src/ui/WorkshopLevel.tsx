@@ -8,6 +8,8 @@ import { fmt } from './format';
 import type { LevelEntry } from './levels';
 import { loadWallet, saveWallet, type Best, type Wallet } from './progress';
 import { trackDrag } from './trackDrag';
+import { TERMINAL_ATTR, useWireDrag } from './useWireDrag';
+import { wirePath, type WireEnd } from './wireRoute';
 
 const BOARD_W = 860, BOARD_H = 440;
 const PART_W = 136, PART_H = 76;
@@ -76,17 +78,20 @@ export function WorkshopLevel({ entry, picker, map, best, onResult, onNext }: Pr
     setSelected(null);
   };
 
-  const clickTerminal = (t: Terminal) => {
-    if (locked) return;
-    if (pending === null) { setPending(t); return; }
-    if (pending !== t) {
-      const from = pending;
-      const id = `wire${nextId.current++}`;
-      setBuild(b => (b.wires.some(w => (w.from === from && w.to === t) || (w.from === t && w.to === from))
-        ? b
-        : { ...b, wires: [...b.wires, { id, from, to: t, mm2: cable }] }));
-    }
+  const connect = (from: Terminal, to: Terminal) => {
+    const id = `wire${nextId.current++}`;
     setPending(null);
+    setBuild(b => (b.wires.some(w => (w.from === from && w.to === to) || (w.from === to && w.to === from))
+      ? b
+      : { ...b, wires: [...b.wires, { id, from, to, mm2: cable }] }));
+  };
+  const { preview, startWireDrag, endedDrag } = useWireDrag(board, connect);
+
+  const clickTerminal = (t: Terminal) => {
+    if (locked || endedDrag()) return;
+    if (pending === null) { setPending(t); return; }
+    if (pending === t) setPending(null);
+    else connect(pending, t);
   };
 
   const pickCable = (mm2: number) => {
@@ -222,13 +227,15 @@ export function WorkshopLevel({ entry, picker, map, best, onResult, onNext }: Pr
               style={{ width: BOARD_W, height: BOARD_H }}
               onPointerDown={e => { if (e.target === e.currentTarget) { setSelected(null); setPending(null); } }}
             >
-              <svg className="wires" width={BOARD_W} height={BOARD_H} aria-hidden={build.wires.length === 0}>
+              <svg className="wires over" width={BOARD_W} height={BOARD_H} aria-hidden={build.wires.length === 0}>
                 {build.wires.map(w => (
                   <WirePath key={w.id} wire={w} parts={build.parts} amps={lastStep?.wireAmps[w.id]} selected={selected === w.id} onSelect={() => { if (!locked) setSelected(w.id); }} />
                 ))}
+                {preview && <line className="wire-preview" x1={preview.x1} y1={preview.y1} x2={preview.x2} y2={preview.y2} />}
               </svg>
 
               {build.parts.length === 0 && <p className="board-empty">Drag a part here, or click it to place it.</p>}
+              {build.parts.length > 0 && build.wires.length === 0 && !locked && <p className="board-tip">Drag from one circle to another to add a wire.</p>}
 
               {build.parts.map(p => {
                 const lit = lastStep?.lit.includes(p.id) ?? false;
@@ -257,9 +264,10 @@ export function WorkshopLevel({ entry, picker, map, best, onResult, onNext }: Pr
                       const t = `${p.id}.${end}`;
                       return (
                         <button
-                          key={end} id={`term-${p.id}-${end}`} type="button" className={`term ${end}${pending === t ? ' pending' : ''}`} disabled={locked}
+                          key={end} id={`term-${p.id}-${end}`} type="button" disabled={locked} {...{ [TERMINAL_ATTR]: t }}
+                          className={`term ${end}${pending === t ? ' pending' : ''}${build.wires.some(w => w.from === t || w.to === t) ? ' wired' : ''}`}
                           aria-label={`${PART_INFO[p.kind].name}, ${PART_INFO[p.kind][end] || (end === 'a' ? 'left side' : 'right side')}`}
-                          onPointerDown={e => e.stopPropagation()} onClick={() => clickTerminal(t)}
+                          onPointerDown={e => startWireDrag(e, t)} onClick={() => clickTerminal(t)}
                         >
                           {PART_INFO[p.kind][end]}
                         </button>
@@ -275,7 +283,7 @@ export function WorkshopLevel({ entry, picker, map, best, onResult, onNext }: Pr
             <button type="button" id="power-on" className="btn primary power-on" disabled={locked} onClick={pressPowerOn}>Power On</button>
             {pending
               ? <span className="hint-now">Now click another connection point.</span>
-              : <span className="hint-now">Click two connection points to join them with a wire.</span>}
+              : <span className="hint-now">Drag between two circles to add a wire, or click one, then the other.</span>}
             {selected && !locked && <button type="button" className="btn" onClick={removeSelected}>Remove selected</button>}
             <button type="button" className="btn" disabled={locked} onClick={() => { setBuild({ parts: [], wires: [] }); setSelected(null); setPending(null); }}>Clear board</button>
           </div>
@@ -333,20 +341,17 @@ export function WorkshopLevel({ entry, picker, map, best, onResult, onNext }: Pr
 }
 
 /** Where a connection point sits on the board. */
-function terminalAt(parts: readonly PlacedPart[], t: Terminal): { x: number; y: number; end: string } | null {
+function terminalAt(parts: readonly PlacedPart[], t: Terminal): WireEnd | null {
   const [id, end] = t.split('.');
   const p = parts.find(q => q.id === id);
-  return p ? { x: end === 'a' ? p.x : p.x + PART_W, y: p.y + PART_H / 2, end } : null;
+  return p ? { x: end === 'a' ? p.x : p.x + PART_W, y: p.y + PART_H / 2, dir: end === 'a' ? -1 : 1 } : null;
 }
 
 function WirePath({ wire, parts, amps, selected, onSelect }: { wire: Wire; parts: readonly PlacedPart[]; amps: number | undefined; selected: boolean; onSelect: () => void }) {
   const a = terminalAt(parts, wire.from), b = terminalAt(parts, wire.to);
   if (!a || !b) return null;
-  const bend = Math.max(40, Math.abs(a.x - b.x) / 2);
-  // Keep the curve on the board
-  const c1 = clamp(a.x + (a.end === 'a' ? -bend : bend), 4, BOARD_W - 4);
-  const c2 = clamp(b.x + (b.end === 'a' ? -bend : bend), 4, BOARD_W - 4);
-  const d = `M${a.x} ${a.y} C${c1} ${a.y} ${c2} ${b.y} ${b.x} ${b.y}`;
+  const boxes = parts.map(p => ({ left: p.x, right: p.x + PART_W, top: p.y, bottom: p.y + PART_H }));
+  const d = wirePath(a, b, BOARD_W, BOARD_H, boxes);
   const live = (amps ?? 0) >= 0.01;
   const hot = live && (amps ?? 0) > cableAmps(wire.mm2);
   return (
