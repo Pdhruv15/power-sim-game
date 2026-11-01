@@ -12,6 +12,7 @@ const ICONS = {
   bath: <path d="M3 12h18v2.5a5 5 0 0 1-5 5H8a5 5 0 0 1-5-5ZM6 12V6.5a2.5 2.5 0 0 1 5 0" />,
   washer: <><rect x="4.5" y="2.5" width="15" height="19" rx="2" /><circle cx="12" cy="13.5" r="4.5" /><path d="M7.5 6h2.5" /></>,
   table: <path d="M3 10h18M6 10v10.5M18 10v10.5M8.5 6h7M12 6v4" />,
+  bar: <><rect x="9" y="2.5" width="6" height="19" rx="1" /><path d="M4 7h5M4 12h5M4 17h5M15 7h5M15 12h5M15 17h5" /></>,
   plug: <path d="M9 2.5v5M15 2.5v5M6.5 7.5h11V11a5.5 5.5 0 0 1-11 0ZM12 16.5v5" />,
 } as const;
 
@@ -39,7 +40,7 @@ export const TERM_TITLES: Readonly<Record<string, string>> = {
   '−': 'Battery minus: current comes back here',
 };
 
-export function PartIcon({ name, size = 28 }: { name: IconName; size?: number }) {
+export function PartIcon({ name, size = 24 }: { name: IconName; size?: number }) {
   return (
     <svg className="part-icon" viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       {ICONS[name]}
