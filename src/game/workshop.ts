@@ -7,7 +7,7 @@ import { fmt } from './format';
  * Nothing runs while they build. Power On tries the build in a few short steps, and the
  * real circuit decides what happens, so any wiring gets an honest result.
  */
-export type PartKind = 'battery' | 'supply' | 'switch' | 'breaker' | 'lamp' | 'light' | 'socket' | 'lbar' | 'nbar';
+export type PartKind = 'battery' | 'supply' | 'switch' | 'breaker' | 'lamp' | 'light' | 'socket' | 'lbar' | 'nbar' | 'ebar' | 'mainswitch';
 
 export interface PlacedPart {
   id: string;
@@ -16,6 +16,10 @@ export interface PlacedPart {
   y: number;
   /** Breaker size, in amps. */
   breakerA?: number;
+  /** Shown instead of the kind's name, to tell two of a kind apart. */
+  label?: string;
+  /** Comes with the level and stays where it is. */
+  fixed?: boolean;
 }
 
 /** One of a part's connection points, such as "<part id>.a". */
@@ -26,6 +30,8 @@ export interface Wire {
   from: Terminal;
   to: Terminal;
   mm2: number;
+  /** Comes with the level, already connected. */
+  fixed?: boolean;
 }
 
 export interface Build {
@@ -55,24 +61,48 @@ export interface Mission {
   hint: readonly string[];
   /** Number on each part's two connection points. Matching numbers are wired together. */
   guide: Partial<Record<PartKind, readonly [number, number]>>;
+  /** What is on the board before the player starts. */
+  start: Build;
 }
 
-export const PART_INFO: Readonly<Record<PartKind, { name: string; a: string; b: string; watts?: number }>> = {
+export const PART_INFO: Readonly<Record<PartKind, { name: string; a: string; b: string; c?: string; watts?: number }>> = {
   battery: { name: 'Battery', a: '+', b: '−' },
-  supply: { name: 'Street supply', a: 'L', b: 'N' },
+  supply: { name: 'Street supply', a: 'L', b: 'N', c: 'E' },
   switch: { name: 'Switch', a: 'IN', b: 'OUT' },
   breaker: { name: 'Breaker', a: 'IN', b: 'OUT' },
   lamp: { name: 'Lamp', a: 'IN', b: 'OUT', watts: 12 },
-  light: { name: 'Room light', a: 'L', b: 'N', watts: 230 },
-  socket: { name: 'Socket and kettle', a: 'L', b: 'N', watts: 3450 },
+  light: { name: 'Room light', a: 'L', b: 'N', c: 'E', watts: 230 },
+  socket: { name: 'Socket and kettle', a: 'L', b: 'N', c: 'E', watts: 3450 },
   lbar: { name: 'L bar', a: '', b: '' },
   nbar: { name: 'N bar', a: '', b: '' },
+  ebar: { name: 'E bar', a: '', b: '' },
+  mainswitch: { name: 'Main switch', a: 'IN', b: 'OUT' },
 };
 
 /** A bus bar is one solid piece of metal: every point on it is the same point. */
-export const isBar = (k: PartKind) => k === 'lbar' || k === 'nbar';
-export const BAR_POINTS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] as const;
-export const partEnds = (k: PartKind): readonly string[] => (isBar(k) ? BAR_POINTS : ['a', 'b']);
+export const isBar = (k: PartKind) => k === 'lbar' || k === 'nbar' || k === 'ebar';
+/** A part's connection points. The third one on a load or the supply is its earth. */
+export const partEnds = (k: PartKind): readonly string[] => (k === 'lbar' || PART_INFO[k].c ? ['a', 'b', 'c'] : ['a', 'b']);
+
+const fixedPart = (id: string, kind: PartKind, x: number, y: number, extra: Partial<PlacedPart> = {}): PlacedPart => ({ id, kind, x, y, fixed: true, ...extra });
+const fixedWire = (from: string, to: string): Wire => ({ id: `fixed:${from}`, from, to, mm2: 16, fixed: true });
+
+/** A ready-made distribution board: the street feeds its main switch and bars, and the main switch feeds the breakers through the L bar. */
+const ROOM_START: Build = {
+  parts: [
+    fixedPart('street', 'supply', 20, 160),
+    fixedPart('main', 'mainswitch', 200, 140, { label: 'Main 40 A' }),
+    fixedPart('lbar', 'lbar', 320, 80),
+    fixedPart('mcb1', 'breaker', 340, 120, { label: 'MCB 1', breakerA: 6 }),
+    fixedPart('mcb2', 'breaker', 440, 120, { label: 'MCB 2', breakerA: 6 }),
+    fixedPart('nbar', 'nbar', 220, 273),
+    fixedPart('ebar', 'ebar', 220, 340),
+  ],
+  wires: [
+    fixedWire('street.a', 'main.a'), fixedWire('main.b', 'lbar.a'), fixedWire('lbar.b', 'mcb1.a'), fixedWire('lbar.c', 'mcb2.a'),
+    fixedWire('street.b', 'nbar.a'), fixedWire('street.c', 'ebar.a'),
+  ],
+};
 
 export const MISSIONS: Readonly<Record<string, Mission>> = {
   'level-circuit': {
@@ -82,20 +112,22 @@ export const MISSIONS: Readonly<Record<string, Mission>> = {
     stars: ['The lamp lights up', 'The switch controls the lamp', 'IN and OUT the right way, no spare wires'],
     hint: ['Battery + to switch IN.', 'Switch OUT to lamp IN.', 'Lamp OUT to battery −.'],
     guide: { battery: [1, 3], switch: [1, 2], lamp: [2, 3] },
+    start: { parts: [], wires: [] },
   },
   'level-room': {
     id: 'level-room', kind: 'room', title: 'One room',
-    goal: 'Power the light and the kettle socket from the street. A faulty kettle must not be able to start a fire.',
-    tray: { supply: 1, breaker: 2, lbar: 1, nbar: 1, light: 1, socket: 1 }, volts: 230, sourceOhms: 0.03, wireLengthM: 5,
-    cables: [1.5, 2.5], breakers: [6, 10, 16, 20], budget: 140,
-    stars: ['The light and kettle both work', 'Safe in a fault: breaker on L, big enough cable', 'Within budget, breaker under 90 %, IN and OUT the right way, one wire on each connection'],
+    goal: 'Feed the light and the kettle socket from the distribution board. Give each its own breaker, and earth them both.',
+    tray: { light: 1, socket: 1 }, volts: 230, sourceOhms: 0.03, wireLengthM: 5,
+    cables: [1.5, 2.5], breakers: [6, 10, 16, 20], budget: 110,
+    stars: ['The light and kettle both work', 'Safe: breaker on L, both loads earthed, big enough cable', 'Within budget, breakers under 90 %, one wire on each connection'],
     hint: [
-      'Street L to breaker IN. Breaker OUT to the L bar, then the L bar to L on the light and on the socket.',
-      'N on the light and on the socket to the N bar, then the N bar to street N.',
-      'The room needs 16 A at once, so pick a 20 A breaker.',
-      'A 20 A breaker needs 2.5 mm² cable on every wire.',
+      'MCB 1 OUT to L on the socket, and MCB 2 OUT to L on the light.',
+      'N bar to N on each load, and E bar to E on each load.',
+      'The kettle needs a 20 A breaker with 2.5 mm² cable.',
+      'The light only needs 6 A and 1.5 mm², which keeps you in budget.',
     ],
-    guide: { supply: [1, 3], breaker: [1, 2], lbar: [2, 2], nbar: [3, 3], light: [2, 3], socket: [2, 3] },
+    guide: {},
+    start: ROOM_START,
   },
 };
 
@@ -147,7 +179,7 @@ const wireOhms = (m: Mission, w: Wire) => (COPPER_OHM_MM2_PER_M * m.wireLengthM)
 export function buildCost(m: Mission, b: Build): number {
   if (m.budget === null) return 0;
   return b.parts.reduce((s, p) => s + (p.kind === 'breaker' ? breakerPrice(p.breakerA ?? 0) : 0), 0)
-    + b.wires.reduce((s, w) => s + cablePrice(w.mm2, m.wireLengthM), 0);
+    + b.wires.reduce((s, w) => s + (w.fixed ? 0 : cablePrice(w.mm2, m.wireLengthM)), 0);
 }
 
 interface Setup {
@@ -163,7 +195,7 @@ function solve(m: Mission, b: Build, setup: Setup) {
   const parts: Resistor[] = [];
   for (const p of b.parts) {
     if (isBar(p.kind)) {
-      BAR_POINTS.slice(1).forEach((end, i) => parts.push({ id: `${p.id}:${i}`, a: `${p.id}.${BAR_POINTS[i]}`, b: `${p.id}.${end}`, ohms: CLOSED_OHMS }));
+      partEnds(p.kind).slice(1).forEach(end => parts.push({ id: `${p.id}:${end}`, a: `${p.id}.a`, b: `${p.id}.${end}`, ohms: CLOSED_OHMS }));
       continue;
     }
     if (isSource(p.kind) || setup.off?.includes(p.id) || setup.open?.includes(p.id)) continue;
@@ -193,8 +225,8 @@ function solve(m: Mission, b: Build, setup: Setup) {
 function joined(b: Build, open: readonly string[] = []) {
   return joinedPoints([
     ...b.wires.map(w => [w.from, w.to] as const),
-    ...b.parts.filter(p => (p.kind === 'switch' || p.kind === 'breaker') && !open.includes(p.id)).map(p => [`${p.id}.a`, `${p.id}.b`] as const),
-    ...b.parts.filter(p => isBar(p.kind)).flatMap(p => BAR_POINTS.slice(1).map(end => [`${p.id}.a`, `${p.id}.${end}`] as const)),
+    ...b.parts.filter(p => (p.kind === 'switch' || p.kind === 'breaker' || p.kind === 'mainswitch') && !open.includes(p.id)).map(p => [`${p.id}.a`, `${p.id}.b`] as const),
+    ...b.parts.filter(p => isBar(p.kind)).flatMap(p => partEnds(p.kind).slice(1).map(end => [`${p.id}.a`, `${p.id}.${end}`] as const)),
   ]);
 }
 
@@ -209,6 +241,14 @@ const missingTip = (m: Mission, b: Build): string | null => {
   const missing = (Object.keys(m.tray) as PartKind[]).filter(k => k !== 'breaker' && !isBar(k) && !b.parts.some(p => p.kind === k));
   return missing.length ? `Place the ${missing.map(k => PART_INFO[k].name.toLowerCase()).join(' and the ')} first.` : null;
 };
+
+/** Which conductor a wire belongs to, once everything is switched on. Null when the build has no street supply. */
+export function wireConductor(b: Build, w: Wire): 'L' | 'N' | 'E' | null {
+  const supply = b.parts.find(p => p.kind === 'supply');
+  if (!supply) return null;
+  const reach = joined(b);
+  return reach(w.from, `${supply.id}.a`) ? 'L' : reach(w.from, `${supply.id}.b`) ? 'N' : reach(w.from, `${supply.id}.c`) ? 'E' : null;
+}
 
 /** Press Power On: try the build and say what happened. Pure function of the mission and the build. */
 export function powerOn(m: Mission, b: Build): PowerOnReport {
@@ -256,8 +296,13 @@ function testRoom(m: Mission, b: Build): PowerOnReport {
   const light = b.parts.find(p => p.kind === 'light')!;
   const socket = b.parts.find(p => p.kind === 'socket')!;
   const breakers = b.parts.filter(p => p.kind === 'breaker');
-  const L = `${supply.id}.a`, N = `${supply.id}.b`;
+  const L = `${supply.id}.a`, N = `${supply.id}.b`, E = `${supply.id}.c`;
   const steps: TestStep[] = [];
+  const reach = joined(b);
+
+  // Earth carries nothing until a fault, so it never joins L or N
+  const liveEarth = [E, `${light.id}.c`, `${socket.id}.c`].find(t => reach(t, L) || reach(t, N));
+  if (liveEarth) return report([], 0, 'Earth is joined to L or N here, which can make metal cases live. Earth wires go only from the E bar to E on each load.', liveEarth.split('.')[0]);
 
   // Step 1: the light on its own
   const lightOnly = solve(m, b, { off: [socket.id] });
@@ -316,10 +361,15 @@ function testRoom(m: Mission, b: Build): PowerOnReport {
     return unsafe('The breaker opens, but the room is still connected to L.',
       `${PART_INFO[liveLoad.kind].name} stays live with its breaker open, which can give a shock. Put breakers on the L side.`, liveLoad.id);
   }
-  const swapped = backwardsPart(joined(b), [light, socket], L);
+  const swapped = backwardsPart(reach, [light, socket], L);
   if (swapped) {
     return unsafe(`The ${PART_INFO[swapped.kind].name} has L and N swapped.`,
       'It still runs, but it can stay live when it looks safe. Bring the breaker wire to L and the return wire to N.', swapped.id);
+  }
+  const unearthed = [light, socket].find(p => !reach(`${p.id}.c`, E));
+  if (unearthed) {
+    const name = PART_INFO[unearthed.kind].name;
+    return unsafe(`${name} has no earth.`, `If a live wire touches its metal case, nothing trips and the case stays live. Connect E on the ${name.toLowerCase()} to the E bar.`, unearthed.id);
   }
   // Every wire needs a breaker it cannot out-carry: opening that breaker is what stops the wire's current
   for (const w of b.wires) {
@@ -343,13 +393,11 @@ function testRoom(m: Mission, b: Build): PowerOnReport {
   if (m.budget !== null && cost > m.budget) return report(steps, 2, `This build costs ${cost} credits against a budget of ${m.budget}. Use fewer parts or thinner cable where it is safe.`);
   const busy = breakers.find(p => both.partAmps(p.id) / (p.breakerA ?? 1) > BANDS.high);
   if (busy) return report(steps, 2, `The ${busy.breakerA} A breaker runs at ${fmt((both.partAmps(busy.id) / (busy.breakerA ?? 1)) * 100, 0)} %. Keep normal peaks under 90 %.`, busy.id);
-  const spare = b.wires.find(w => both.wireAmps[w.id] < NO_CURRENT_A);
+  const spare = b.wires.find(w => !w.fixed && !reach(w.from, E) && both.wireAmps[w.id] < NO_CURRENT_A);
   if (spare) return report(steps, 2, 'One wire carries no current. Remove it for the third star.', spare.id);
-  const backwards = backwardsPart(dead, breakers, L);
-  if (backwards) return report(steps, 2, `The ${backwards.breakerA} A breaker is the wrong way round. Bring the street to IN and take the room from OUT.`, backwards.id);
   // Real terminals take one wire. Sharing a connection is what a bus bar is for.
   const crowded = b.parts.find(p => !isBar(p.kind) && partEnds(p.kind).some(end => b.wires.filter(w => w.from === `${p.id}.${end}` || w.to === `${p.id}.${end}`).length > 1));
-  if (crowded) return report(steps, 2, `Two wires share one connection on the ${PART_INFO[crowded.kind].name.toLowerCase()}. Run them from the L bar or the N bar instead.`, crowded.id);
+  if (crowded) return report(steps, 2, `Two wires share one connection on the ${PART_INFO[crowded.kind].name.toLowerCase()}. Give each load its own breaker, and use the bars to share N and E.`, crowded.id);
   return report(steps, 3, null);
 }
 

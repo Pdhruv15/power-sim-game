@@ -254,7 +254,7 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .wire.hot .wire-line { stroke: var(--high); }
 .wire text { font: 11px var(--mono); fill: var(--fg); paint-order: stroke; stroke: var(--panel); stroke-width: 3px; pointer-events: none; }
 
-.part { position: absolute; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 3px 22px; text-align: center;
+.part { position: absolute; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 3px 16px; text-align: center;
   background: var(--panel-2); border: 1px solid #3a4754; border-radius: 6px; cursor: grab; user-select: none; touch-action: none; }
 .part:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .part.sel { border-color: var(--accent); }
@@ -267,25 +267,40 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .part.lit .part-state { color: var(--warn); }
 .part.open .part-state { color: var(--high); }
 .part select { padding: 2px 4px; font-size: 12px; }
-.term { position: absolute; top: 50%; width: 18px; height: 18px; transform: translateY(-50%); padding: 0; border-radius: 50%; background: var(--bg); border: 2px solid var(--muted); color: var(--fg); font: 600 10px var(--mono); cursor: crosshair; line-height: 1; }
+.term { position: absolute; top: 50%; width: 10px; height: 10px; transform: translateY(-50%); padding: 0; border-radius: 50%; background: var(--bg); border: 1.5px solid var(--muted); color: var(--fg); font: 600 10px var(--mono); cursor: crosshair; line-height: 1; }
 /* A small circle to look at, with a bigger area to press. */
-.term::before { content: ''; position: absolute; inset: -9px; border-radius: 50%; }
+.term::before { content: ''; position: absolute; inset: -11px; border-radius: 50%; }
 .term-label { position: absolute; top: 50%; transform: translateY(-50%); font: 600 9.5px var(--mono); letter-spacing: .02em; color: var(--muted); pointer-events: none; }
 .term.a .term-label { left: calc(100% + 3px); }
 .term.b .term-label { right: calc(100% + 3px); }
+.term.top .term-label, .term.bottom .term-label { top: auto; left: 50%; transform: translateX(-50%); white-space: nowrap; }
+.term.top .term-label { top: calc(100% + 1px); }
+.term.bottom .term-label { bottom: calc(100% + 1px); }
+.term-label b { color: var(--accent); }
 .part-icon { flex: none; color: var(--muted); }
-.part.bus-bar { padding: 0; border-radius: 3px; border: 0; }
+.part.bus-bar { padding: 0; border-radius: 2px; border: 0; cursor: default; }
+.part.kind-breaker, .part.kind-mainswitch { padding: 3px 4px; cursor: default; }
+.part.kind-mainswitch .part-name { padding: 0 18px; }
+.part.kind-supply { cursor: default; }
+.db-box { position: absolute; box-sizing: border-box; border: 1.5px solid #6f7f8e; border-radius: 6px; background: color-mix(in srgb, var(--panel-2) 45%, transparent); pointer-events: none; }
+.db-box span { position: absolute; left: 14px; top: 10px; font-size: 13px; font-weight: 600; }
+.wire-dot { fill: #dde5ec; pointer-events: none; }
+.wire.cond-L .wire-line { stroke: #d09a48; }
+.wire.cond-N .wire-line { stroke: #5b9fe0; }
+.wire.cond-E .wire-line { stroke: #5cb87a; }
+.wire.fixed .wire-hit { cursor: default; }
 .part.bus-bar.kind-lbar { background: color-mix(in srgb, var(--warn) 55%, var(--panel-2)); }
 .part.bus-bar.kind-nbar { background: color-mix(in srgb, var(--accent) 55%, var(--panel-2)); }
-.part.bus-bar .part-name { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 11px; white-space: nowrap; }
+.part.bus-bar.kind-ebar { background: color-mix(in srgb, var(--ok) 55%, var(--panel-2)); }
+.part.bus-bar .part-name { position: absolute; top: -17px; left: 0; font-size: 11px; white-space: nowrap; }
 .part.bus-bar.sel { outline: 2px solid var(--fg); }
 .part.safe-trip { border: 2px solid var(--ok); }
 .part.safe-trip .part-icon, .part.safe-trip .part-state { color: var(--ok); }
 .part.lit .part-icon { color: var(--warn); }
 .part.open .part-icon { color: var(--high); }
 .part-title { display: flex; align-items: center; justify-content: center; gap: 5px; }
-.term.a { left: -9px; }
-.term.b { right: -9px; }
+.term.a { left: -5px; }
+.term.b { right: -5px; }
 .term:hover:not(:disabled), .term:focus-visible { border-color: var(--accent); outline: none; }
 .term.pending { background: var(--accent); border-color: var(--accent); color: #07121d; }
 .term:disabled { cursor: default; }
@@ -312,11 +327,11 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 /* ---------- site builder ---------- */
 .build-mode { align-self: flex-start; }
 .build-mode button { min-height: 36px; }
-.room-part { cursor: default; touch-action: auto; padding: 4px 8px 4px 28px; }
+.room-part { cursor: default; touch-action: auto; padding: 3px 6px 3px 21px; }
 .room-part .part-name, .panel-part .part-name { font-size: 12.5px; }
 .room-picks { display: flex; gap: 4px; width: 100%; }
 .room-picks select { flex: 1; min-width: 0; }
-.panel-part { padding: 4px 28px; }
+.panel-part { padding: 3px 21px; }
 .feeder-list { list-style: none; margin: 0; padding: 0; font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .rule-line { margin: 0; font-family: var(--mono); font-size: 12px; color: var(--accent); }
 .solar-pick { display: flex; flex-direction: column; gap: 2px; }
