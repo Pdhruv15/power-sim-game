@@ -453,3 +453,10 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .pick-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
 .pick-fields label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 .pick-fields small { font-size: 12px; color: var(--muted); }
+/* Events marked on the time bar during a run */
+.slider { position: relative; }
+.event-marks { position: absolute; left: 8px; right: 8px; top: -9px; height: 10px; pointer-events: none; }
+.event-mark { position: absolute; top: 0; width: 10px; height: 10px; margin-left: -5px; padding: 0; border: 2px solid var(--panel); border-radius: 50%; background: var(--high); cursor: pointer; pointer-events: auto; opacity: .45; }
+.event-mark.warn { background: var(--warn); }
+.event-mark.past { opacity: 1; }
+.event-mark:hover, .event-mark:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; opacity: 1; }
