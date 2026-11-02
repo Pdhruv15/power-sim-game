@@ -460,3 +460,12 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .event-mark.warn { background: var(--warn); }
 .event-mark.past { opacity: 1; }
 .event-mark:hover, .event-mark:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; opacity: 1; }
+/* Phases in the 3D build: the usual brown, black and grey */
+.scene-label.build[data-phase]::after { content: attr(data-phase); display: block; width: max-content; margin: 2px auto 0; padding: 0 5px; border-radius: 2px; font-size: 10px; font-weight: 600; }
+.scene-label.build[data-phase="L1"]::after, .ph-tag.ph-L1, .hot-slot.phase.ph-L1 i { background: #8a4f24; color: #fff; }
+.scene-label.build[data-phase="L2"]::after, .ph-tag.ph-L2, .hot-slot.phase.ph-L2 i { background: #0b0b0b; color: #fff; box-shadow: inset 0 0 0 1px #6d7780; }
+.scene-label.build[data-phase="L3"]::after, .ph-tag.ph-L3, .hot-slot.phase.ph-L3 i { background: #8b939a; color: #0e1318; }
+.ph-tag { font-style: normal; font-size: 10px; font-weight: 600; padding: 0 4px; border-radius: 2px; }
+.hot-slot.phase i { font-style: normal; font-family: var(--mono); font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 3px; margin-bottom: 2px; }
+.pick-group { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; }
+.focus-pick { position: absolute; top: 10px; right: 10px; z-index: 2; }

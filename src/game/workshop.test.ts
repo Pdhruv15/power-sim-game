@@ -338,4 +338,22 @@ describe('building a site with parts in hand', () => {
     const fed = use(l, placed, [{ kind: 'board' }, { kind: 'board', id: 'FP' }], [{ kind: 'cable', mm2: 10 }, { kind: 'board', id: 'VA' }]);
     expect(fed.boards.VA.mm2).toBe(10);
   });
+
+  it('puts each board on its own spot', () => {
+    const l = street();
+    const b = newSiteBuild(l, 63, 16);
+    expect(applySiteTool(l, b, { kind: 'board', board: 'VB' }, { kind: 'room', id: 'A1' }).tip).toBe('The Villa B has its own spot: click a room in Villa B.');
+    expect(applySiteTool(l, b, { kind: 'board', board: 'FP' }, { kind: 'room', id: 'A1' }).tip).toBe("The Feeder pillar has its own spot: click the Feeder pillar's spot.");
+    const placed = use(l, b, [{ kind: 'board', board: 'VB' }, { kind: 'room', id: 'B2' }], [{ kind: 'board', board: 'FP' }, { kind: 'board', id: 'FP' }]);
+    expect([placed.boards.FP.placed, placed.boards.VA.placed, placed.boards.VB.placed]).toEqual([true, false, true]);
+  });
+
+  it('moves rooms onto a phase with the phase in hand, on three-phase boards only', () => {
+    const l = street();
+    const b = use(l, newSiteBuild(l, 63, 16), [{ kind: 'phase', phase: 'L2' }, { kind: 'room', id: 'A2' }], [{ kind: 'phase', phase: 'L3' }, { kind: 'room', id: 'B3' }]);
+    expect([b.rooms.A1.phase, b.rooms.A2.phase, b.rooms.B3.phase]).toEqual(['L1', 'L2', 'L3']);
+    expect(applySiteTool(l, b, { kind: 'phase', phase: 'L2' }, { kind: 'board', id: 'VA' }).tip).toBe('Phases are picked room by room: click a room.');
+    const v = villa();
+    expect(applySiteTool(v, newSiteBuild(v, 63, 16), { kind: 'phase', phase: 'L2' }, { kind: 'room', id: 'C1' }).tip).toBe('Villa DB is single-phase, so every room on it is on L1.');
+  });
 });

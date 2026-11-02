@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
-import { PHASES, topBoard, TRANSFORMER_ID, type Board, type Circuit, type Level, type SimResult } from '../sim';
+import { PHASES, topBoard, TRANSFORMER_ID, type Board, type Circuit, type Level, type Phase, type SimResult } from '../sim';
 import { STATUS, statusColor } from './colors';
 import { boardLabelVisible, inBlackout, roomLabelVisible, type LabelMode, type RoomState } from './labelRules';
 import { CABLE_DEPTH, Landscape } from './Landscape';
@@ -30,8 +30,8 @@ const MARKER_LIFT = 1.7;
 
 /** Build mode only: room still to wire, and room wired. */
 const TO_WIRE = 0x63b3ff, WIRED = 0xf0a531;
-/** How close the view comes in on one house, when building and when its day runs. */
-const BUILD_ZOOM = 2;
+/** How close the view comes in on one house. A site of a few houses comes in less, to keep them all in view. */
+const HOUSE_ZOOM = 2, SITE_ZOOM = 1.5;
 const LAMP = 0xffd58a;
 
 /** What the player has built so far, while building the site in 3D. */
@@ -39,14 +39,17 @@ export interface BuildView {
   /** Per board: placed yet, its feeder cable laid, and the line under its name. */
   boards: Readonly<Record<string, { placed: boolean; fed: boolean; name: string; text: string }>>;
   supplyWired: boolean;
-  /** Per room: its cable laid, and the line under its name. */
-  rooms: Readonly<Record<string, { wired: boolean; text: string }>>;
+  /** Per room: its cable laid, the line under its name, and its phase on a three-phase board. */
+  rooms: Readonly<Record<string, { wired: boolean; text: string; phase: Phase | null }>>;
   /** Room or board picked to change its sizes. */
   selected: string | null;
   /** What the part in hand can be used on. These pulse. */
   targets: 'rooms' | 'boards' | null;
-  /** Show where boards not yet placed will go. */
+  /** Show where boards not yet placed will go: all of them, or only the one in hand. */
   ghostBoards: boolean;
+  ghostBoard?: string | null;
+  /** Room labels shown: every room, only those of one house (by its board), or none but the picked one. */
+  roomLabels?: 'all' | 'none' | string;
 }
 
 interface RoomParts {
@@ -130,6 +133,11 @@ export class SiteScene {
   private supply: { mat: THREE.MeshBasicMaterial; labelObj: CSS2DObject; meshes: THREE.Mesh[] } | null = null;
   /** Furthest the view may pan from the site centre. */
   private panLimit = 30;
+  /** Zoom for the close view of this site, and where the view looks when it takes in the whole site. */
+  private closeZoom = 1;
+  private home = new THREE.Vector3();
+  /** Middle of each house, by its board, in site coordinates. */
+  private unitAt = new Map<string, THREE.Vector3>();
   private span = 20;
   private clock = new THREE.Clock();
   private resizeObserver: ResizeObserver;
@@ -225,9 +233,20 @@ export class SiteScene {
     this.refreshLabels();
   }
 
-  /** Close in on the house, as when building it, so its day plays out in the same view. */
+  /** Close in on the site, as when building it, so its day plays out in the same view. */
   closeIn(): void {
-    this.camera.zoom = BUILD_ZOOM;
+    this.focusOn(null);
+  }
+
+  /** Look at one house up close, by its board, or (null) at the whole site in its close view. */
+  focusOn(boardId: string | null): void {
+    const at = boardId ? this.unitAt.get(boardId) : undefined;
+    this.site.updateMatrixWorld();
+    const to = at ? this.site.localToWorld(at.clone()).setY(this.home.y) : this.home.clone();
+    const shift = to.sub(this.controls.target);
+    this.controls.target.add(shift);
+    this.camera.position.add(shift);
+    this.camera.zoom = at ? HOUSE_ZOOM : this.closeZoom;
     this.camera.updateProjectionMatrix();
   }
 
@@ -256,13 +275,15 @@ export class SiteScene {
       rm.marker.visible = false;
       rm.label.className = `scene-label build${r.wired ? ' wired' : ''}${id === view.selected ? ' sel' : ''}`;
       rm.label.lastChild!.textContent = r.text;
+      if (r.phase) rm.label.dataset.phase = r.phase;
+      else delete rm.label.dataset.phase;
     }
     for (const [id, bp] of this.boards) {
       const b = view.boards[id];
       if (!b) continue;
       if (bp.cabinet) {
         const m = bp.cabinet.material as THREE.MeshStandardMaterial;
-        bp.cabinet.visible = b.placed || view.ghostBoards;
+        bp.cabinet.visible = b.placed || (view.ghostBoards && (!view.ghostBoard || view.ghostBoard === id));
         if (bp.hit) bp.hit.visible = bp.cabinet.visible;
         // A board inside a house shows its label past the west wall, clear of the room labels
         if (bp.cabinet.parent !== this.site) bp.labelObj.position.set(bp.labelAt.x - 2.2, bp.labelAt.y - 0.6, bp.labelAt.z);
@@ -313,7 +334,11 @@ export class SiteScene {
     const view = this.build;
     if (view) {
       // Building: every room's name and needs, and boards once placed
-      for (const rm of this.rooms.values()) rm.labelObj.visible = rm.floor <= this.floorLimit;
+      const shownOn = view.roomLabels ?? 'all';
+      for (const [id, rm] of this.rooms) {
+        const mine = shownOn === 'all' || this.roomBoard.get(id) === shownOn || id === view.selected || id === this.hovered;
+        rm.labelObj.visible = rm.floor <= this.floorLimit && mine;
+      }
       for (const [id, bp] of this.boards) bp.labelObj.visible = bp.floor <= this.floorLimit && (view.boards[id]?.placed ?? false);
       if (this.supply) this.supply.labelObj.visible = view.supplyWired;
       return;
@@ -409,6 +434,7 @@ export class SiteScene {
         this.site.add(g);
         if (f > 0) this.floorObjects.push({ floor: f, obj: g });
         const db = this.buildVilla(g, b, level.circuits.filter(c => c.board === b.id), units.length > 1, f === topFloor);
+        this.unitAt.set(b.id, g.position.clone());
         dbAt.set(b.id, db.add(g.position));
         if (!building || l === lines[0]) footprints.push(around(g.position.x, g.position.z, W / 2 + 0.3, sizeOf.get(b.id)!.D / 2 + 0.3));
         x += W + gap;
@@ -477,6 +503,8 @@ export class SiteScene {
     this.span = Math.max(siteSpan, tileSpan * 0.65);
     this.panLimit = tileSpan * 0.45;
     this.controls.target.set(0, height / 2, 0);
+    this.home.copy(this.controls.target);
+    this.closeZoom = building || village ? 1 : units.length === 1 ? HOUSE_ZOOM : SITE_ZOOM;
     this.addLabel(this.scene, 'N ↑', new THREE.Vector3(0, 0, backZ - 4), 'scene-label tag'); // north is world −z
   }
 
