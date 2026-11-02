@@ -18,6 +18,8 @@ export function webglAvailable(): boolean {
 interface Props {
   level: Level;
   view: BuildView;
+  /** House to look at up close, by its board, or null for the whole site. */
+  focus?: string | null;
   onPick: (kind: 'room' | 'board', id: string) => void;
   /** A click landed on neither a room nor a board. */
   onMiss: () => void;
@@ -26,7 +28,7 @@ interface Props {
 }
 
 /** Hosts the Three.js scene in build mode: the site as built so far, with the roof off and the view held still. */
-export function BuildStage({ level, view, onPick, onMiss, onFail }: Props) {
+export function BuildStage({ level, view, focus = null, onPick, onMiss, onFail }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const scene = useRef<SiteScene | null>(null);
   const latest = useRef({ view, onPick, onMiss, onFail });
@@ -52,6 +54,7 @@ export function BuildStage({ level, view, onPick, onMiss, onFail }: Props) {
   }, [level]);
 
   useEffect(() => { scene.current?.setBuildView(view); }, [view]);
+  useEffect(() => { scene.current?.focusOn(focus); }, [focus]);
 
   return <div className="stage build-stage" ref={host} />;
 }

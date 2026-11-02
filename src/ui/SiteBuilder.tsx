@@ -78,12 +78,17 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
   const threePhase = level.boards.some(b => b.phases === 3);
   const solarScored = ((level.points ?? DEFAULT_POINTS).solar ?? 0) > 0;
   const nameOf = (b: Board) => (level.boards.length === 1 ? 'Board' : b.name);
-  // A site with one board is built in the 3D world. Bigger sites, and devices without 3D, use the diagram.
-  const can3d = !hasSheets;
+  // Villas are built in the 3D world. Buildings and villages, and devices without 3D, use the diagram.
+  const can3d = !level.boards.some(b => (b.floor ?? 0) > 0 || b.row !== undefined);
   const [view, setView] = useState<'3d' | 'diagram'>('3d');
   const [no3d, setNo3d] = useState(() => !webglAvailable());
   const in3d = can3d && !no3d && view === '3d';
   const [tool, setTool] = useState<SiteTool | null>(null);
+  /** 3D: the house looked at up close, by its board, or null for the whole site. */
+  const [focus, setFocus] = useState<string | null>(null);
+  const houses = level.boards.filter(b => level.circuits.some(c => c.board === b.id));
+  const roomCables = below.length ? CABLE_SIZES : ROOM_CABLES;
+  const phased = level.boards.some(b => b.phases === 3 && level.circuits.some(c => c.board === b.id));
 
   useEffect(() => {
     if (!tool) return;
@@ -171,7 +176,7 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
   const takeTool = (t: SiteTool) => {
     setSelected(null);
     setTip(null);
-    setTool(cur => (cur?.kind === t.kind && (cur.kind !== 'cable' || t.kind !== 'cable' || cur.mm2 === t.mm2) ? null : t));
+    setTool(cur => (JSON.stringify(cur) === JSON.stringify(t) ? null : t));
     if (t.kind === 'cable') setCable(t.mm2);
   };
   /** 3D: a click on a room or a board uses the part in hand, or picks it to change its sizes. */
@@ -184,7 +189,7 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
     const r = applySiteTool(level, build, tool, { kind, id });
     if (!r.build) { setTip(r.tip); return; }
     update(r.build);
-    if (tool.kind !== 'cable') setTool(null);
+    if (tool.kind === 'board' || tool.kind === 'supply') setTool(null);
   };
 
   const pressPowerOn = () => {
@@ -244,27 +249,40 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
   const selectedBoard = level.boards.find(b => selected === `board.${b.id}`);
   const selectedRoom = level.circuits.find(c => selected === roomIn(c.id));
 
+  /** Rooms on a phase, across the three-phase boards. */
+  const onPhase = (p: Phase) => level.circuits.filter(c => build.rooms[c.id].phase === p && level.boards.find(b => b.id === c.board)?.phases === 3).length;
+  /** The board in hand, if any. */
+  const held = tool?.kind === 'board' ? level.boards.find(b => b.id === tool.board) ?? top : null;
+
   const buildView = useMemo<BuildView>(() => ({
     boards: Object.fromEntries(level.boards.map(b => {
       const s = build.boards[b.id];
-      return [b.id, { placed: s.placed, fed: s.mm2 != null, name: nameOf(b), text: s.placed ? `${s.breakerA} A` : 'not placed' }];
+      const split = b.phases === 3 && s.placed ? PHASES.map((p, i) => `${p} ${fmt(needs.boards.get(b.id)?.phaseAmps?.[i] ?? 0, 0)}`).join(' · ') + ' A' : null;
+      return [b.id, { placed: s.placed, fed: s.mm2 != null, name: nameOf(b), text: split ?? (s.placed ? `${s.breakerA} A` : 'not placed') }];
     })),
     supplyWired: build.supplyWired,
     rooms: Object.fromEntries(level.circuits.map(c => {
       const r = build.rooms[c.id];
-      return [c.id, { wired: r.mm2 != null, text: r.mm2 != null ? `${r.breakerA} A · ${r.mm2} mm²` : `up to ${fmt(needs.circuits.get(c.id)?.amps ?? 0)} A` }];
+      const phase = level.boards.find(b => b.id === c.board)?.phases === 3 ? r.phase : null;
+      return [c.id, { wired: r.mm2 != null, phase, text: r.mm2 != null ? `${r.breakerA} A · ${r.mm2} mm²` : `up to ${fmt(needs.circuits.get(c.id)?.amps ?? 0)} A` }];
     })),
     selected: selectedRoom?.id ?? selectedBoard?.id ?? null,
-    targets: tool?.kind === 'supply' ? 'boards' : tool ? 'rooms' : null,
+    targets: tool?.kind === 'supply' || (held && !houses.includes(held)) ? 'boards' : tool ? 'rooms' : null,
     ghostBoards: tool?.kind === 'board',
+    ghostBoard: tool?.kind === 'board' ? tool.board ?? null : null,
+    // With several houses in view their labels would pile up, so only the house looked at shows its rooms
+    roomLabels: houses.length <= 1 ? 'all' : focus ?? 'none',
     // nameOf only reads the level
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [level, build, needs, selectedRoom, selectedBoard, tool]);
+  }), [level, build, needs, selectedRoom, selectedBoard, tool, held, focus]);
   const toolHint = !tool
     ? 'Pick a part below, then click in the house. Click a room to change its sizes.'
-    : tool.kind === 'board' ? `Click the house to fix the ${nameOf(top).toLowerCase()} at the end of the corridor.`
+    : tool.kind === 'board' ? (held && houses.includes(held)
+      ? `Click a room in ${level.boards.length === 1 ? 'the house' : held.name} to fix its board at the end of the corridor.`
+      : `Click the faint ${(held ?? top).name.toLowerCase()} by the street to place it.`)
       : tool.kind === 'supply' ? `Click the ${nameOf(top).toLowerCase()} to bring the street cable to it.`
-        : `Click each room to run a ${tool.mm2} mm² cable to it (good for ${cableAmps(tool.mm2)} A). Pick the cable again, or press Esc, to put it down.`;
+        : tool.kind === 'phase' ? `Click each room to move it onto ${tool.phase}. Keep L1, L2 and L3 about equal on every board.`
+          : `Click each room to run a ${tool.mm2} mm² cable to it (good for ${cableAmps(tool.mm2)} A)${below.length ? ', or a board to run its feeder' : ''}. Pick the cable again, or press Esc, to put it down.`;
 
   return (
     <section className="sim site-build">
@@ -280,17 +298,26 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
           <>
             <div className="stage-wrap build-wrap">
               <BuildStage
-                level={level} view={buildView} onPick={pick} onFail={() => { setNo3d(true); setTool(null); }}
-                onMiss={() => { if (tool) setTip(`Click inside the house: a room, or the ${nameOf(top).toLowerCase()} at the end of the corridor.`); else setSelected(null); }}
+                level={level} view={buildView} focus={focus} onPick={pick} onFail={() => { setNo3d(true); setTool(null); }}
+                onMiss={() => {
+                  if (!tool) setSelected(null);
+                  else setTip(below.length ? 'Click a room, a board, or the feeder pillar by the street.' : `Click inside the house: a room, or the ${nameOf(top).toLowerCase()} at the end of the corridor.`);
+                }}
               />
               <p className="build-count"><b>{wired} of {level.circuits.length}</b> rooms wired</p>
+              {houses.length > 1 && (
+                <div className="seg focus-pick" role="group" aria-label="Look at">
+                  <button type="button" id="focus-site" aria-pressed={focus === null} onClick={() => setFocus(null)}>Whole site</button>
+                  {houses.map(b => <button key={b.id} type="button" id={`focus-${b.id}`} aria-pressed={focus === b.id} onClick={() => setFocus(b.id)}>{b.name}</button>)}
+                </div>
+              )}
             </div>
 
             <div className="hotbar" role="toolbar" aria-label="Parts">
               {level.boards.map(b => (
                 <button
-                  key={b.id} type="button" id={`tool-board-${b.id}`} className="hot-slot" aria-pressed={tool?.kind === 'board'}
-                  disabled={build.boards[b.id].placed} onClick={() => takeTool({ kind: 'board' })}
+                  key={b.id} type="button" id={`tool-board-${b.id}`} className="hot-slot" aria-pressed={held?.id === b.id}
+                  disabled={build.boards[b.id].placed} onClick={() => takeTool({ kind: 'board', board: b.id })}
                 >
                   <PartIcon name="board" size={22} /><b>{nameOf(b)}</b><small>{build.boards[b.id].placed ? 'placed' : '1 left'}</small>
                 </button>
@@ -301,7 +328,7 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
               >
                 <PartIcon name="supply" size={22} /><b>Street cable</b><small>{build.supplyWired ? 'laid' : 'to the board'}</small>
               </button>
-              {ROOM_CABLES.map(mm => (
+              {roomCables.map(mm => (
                 <button
                   key={mm} type="button" id={`tool-cable-${mm}`} className="hot-slot cable" aria-pressed={tool?.kind === 'cable' && tool.mm2 === mm}
                   onClick={() => takeTool({ kind: 'cable', mm2: mm })}
@@ -309,26 +336,37 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
                   <i style={{ height: Math.min(8, 2 + mm * 0.6) }} aria-hidden="true" /><b>{mm} mm²</b><small>{cableAmps(mm)} A</small>
                 </button>
               ))}
+              {phased && PHASES.map(p => (
+                <button
+                  key={p} type="button" id={`tool-phase-${p}`} className={`hot-slot phase ph-${p}`} aria-pressed={tool?.kind === 'phase' && tool.phase === p}
+                  onClick={() => takeTool({ kind: 'phase', phase: p })}
+                >
+                  <i aria-hidden="true">{p}</i><b>Phase {p}</b><small>{onPhase(p)} room{onPhase(p) === 1 ? '' : 's'}</small>
+                </button>
+              ))}
             </div>
 
             <div className="pick-strip" role="group" aria-label="Rooms">
-              {level.circuits.map(c => (
-                <button
-                  key={c.id} type="button" id={`pick-${c.id}`}
-                  className={`pick-chip${build.rooms[c.id].mm2 != null ? ' on' : ''}${selectedRoom?.id === c.id ? ' sel' : ''}`}
-                  onClick={() => pick('room', c.id)}
-                >
-                  <PartIcon name={loadIcon(c.type)} size={16} />{c.room}
-                </button>
-              ))}
               {level.boards.map(b => (
-                <button
-                  key={b.id} type="button" id={`pick-board-${b.id}`}
-                  className={`pick-chip board${build.boards[b.id].placed ? ' on' : ''}${selectedBoard?.id === b.id ? ' sel' : ''}`}
-                  onClick={() => pick('board', b.id)}
-                >
-                  <PartIcon name="board" size={16} />{nameOf(b)}
-                </button>
+                <span key={b.id} className="pick-group">
+                  <button
+                    type="button" id={`pick-board-${b.id}`}
+                    className={`pick-chip board${build.boards[b.id].placed ? ' on' : ''}${selectedBoard?.id === b.id ? ' sel' : ''}`}
+                    onClick={() => pick('board', b.id)}
+                  >
+                    <PartIcon name="board" size={16} />{nameOf(b)}
+                  </button>
+                  {level.circuits.filter(c => c.board === b.id).map(c => (
+                    <button
+                      key={c.id} type="button" id={`pick-${c.id}`} aria-label={level.boards.length > 1 ? `${b.name}, ${c.room}` : undefined}
+                      className={`pick-chip${build.rooms[c.id].mm2 != null ? ' on' : ''}${selectedRoom?.id === c.id ? ' sel' : ''}`}
+                      onClick={() => pick('room', c.id)}
+                    >
+                      <PartIcon name={loadIcon(c.type)} size={16} />{c.room}
+                      {b.phases === 3 && <i className={`ph-tag ph-${build.rooms[c.id].phase}`}>{build.rooms[c.id].phase}</i>}
+                    </button>
+                  ))}
+                </span>
               ))}
             </div>
 
@@ -348,7 +386,7 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
                     <label>Cable
                       <select id={`cable-${c.id}`} value={room.mm2 ?? ''} onChange={e => setRoom(c.id, { mm2: e.target.value === '' ? null : Number(e.target.value) })}>
                         <option value="">None yet</option>
-                        {ROOM_CABLES.map(mm => <option key={mm} value={mm}>{mm} mm² · {cableAmps(mm)} A</option>)}
+                        {roomCables.map(mm => <option key={mm} value={mm}>{mm} mm² · {cableAmps(mm)} A</option>)}
                       </select>
                     </label>
                     {board.phases === 3 && (
@@ -370,12 +408,22 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
                 </header>
                 {build.boards[selectedBoard.id].placed && (
                   <div className="pick-fields">
-                    <label>Main breaker
+                    <label>{selectedBoard.parent ? 'Feeder breaker' : 'Main breaker'}
                       <select id={`brk-${selectedBoard.id}`} value={build.boards[selectedBoard.id].breakerA} onChange={e => setBoard(selectedBoard.id, { breakerA: Number(e.target.value) })}>
                         {BOARD_BREAKER_SIZES.map(a => <option key={a} value={a}>{a} A</option>)}
                       </select>
                     </label>
-                    <small>{build.supplyWired ? 'Street cable laid' : 'No street cable yet'}</small>
+                    {selectedBoard.parent ? (
+                      <label>Feeder cable, {selectedBoard.cable?.lengthM} m
+                        <select
+                          id={`feeder-${selectedBoard.id}`} value={build.boards[selectedBoard.id].mm2 ?? ''}
+                          onChange={e => setBoard(selectedBoard.id, { mm2: e.target.value === '' ? null : Number(e.target.value) })}
+                        >
+                          <option value="">None yet</option>
+                          {CABLE_SIZES.map(mm => <option key={mm} value={mm}>{mm} mm² · {cableAmps(mm)} A</option>)}
+                        </select>
+                      </label>
+                    ) : <small>{build.supplyWired ? 'Street cable laid' : 'No street cable yet'}</small>}
                   </div>
                 )}
               </section>

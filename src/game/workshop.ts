@@ -454,8 +454,11 @@ export function siteDesign(level: Level, b: SiteBuild): { design: Level; tip: nu
   };
 }
 
-/** A part in the player's hand while building a site in 3D. A cable stays in hand for room after room. */
-export type SiteTool = { kind: 'board' } | { kind: 'supply' } | { kind: 'cable'; mm2: number };
+/**
+ * A part in the player's hand while building a site in 3D: a board for its own spot, the street cable,
+ * a cable size, or a phase to move rooms onto. Cables and phases stay in hand for room after room.
+ */
+export type SiteTool = { kind: 'board'; board?: string } | { kind: 'supply' } | { kind: 'cable'; mm2: number } | { kind: 'phase'; phase: Phase };
 
 /** What was clicked: a room (by circuit id) or a board. */
 export interface SiteTarget {
@@ -472,8 +475,18 @@ export function applySiteTool(level: Level, b: SiteBuild, tool: SiteTool, target
   const setBoard = (patch: Partial<SiteBuild['boards'][string]>) => ({ ...b, boards: { ...b.boards, [board.id]: { ...b.boards[board.id], ...patch } } });
 
   if (tool.kind === 'board') {
+    const want = level.boards.find(x => x.id === (tool.board ?? board.id)) ?? board;
+    if (want.id !== board.id) {
+      const where = level.circuits.some(c => c.board === want.id) ? `a room in ${want.name}` : `the ${want.name}'s spot`;
+      return { build: null, tip: `The ${want.name} has its own spot: click ${where}.` };
+    }
     if (b.boards[board.id].placed) return { build: null, tip: `The ${board.name} is already in place.` };
     return { build: setBoard({ placed: true }), tip: null };
+  }
+  if (tool.kind === 'phase') {
+    if (!room) return { build: null, tip: 'Phases are picked room by room: click a room.' };
+    if (board.phases !== 3) return { build: null, tip: `${board.name} is single-phase, so every room on it is on L1.` };
+    return { build: { ...b, rooms: { ...b.rooms, [room.id]: { ...b.rooms[room.id], phase: tool.phase } } }, tip: null };
   }
   if (tool.kind === 'supply') {
     const top = topBoard(level);

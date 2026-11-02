@@ -7,7 +7,7 @@ import type { BuildView } from '../render/SiteScene';
 import { App } from './App';
 
 // jsdom has no WebGL, so a stand-in scene records what the game asks it to show
-const scenes = vi.hoisted(() => [] as { onPick: (kind: 'room' | 'board', id: string) => void; onMiss: () => void; views: BuildView[]; closedIn: boolean }[]);
+const scenes = vi.hoisted(() => [] as { onPick: (kind: 'room' | 'board', id: string) => void; onMiss: () => void; views: BuildView[]; closedIn: boolean; focus: (string | null)[] }[]);
 vi.mock('../render/SiteScene', () => ({
   SiteScene: class {
     onPick: (kind: 'room' | 'board', id: string) => void = () => {};
@@ -15,8 +15,10 @@ vi.mock('../render/SiteScene', () => ({
     onRoomClick = () => {};
     views: BuildView[] = [];
     closedIn = false;
+    focus: (string | null)[] = [];
     constructor() { scenes.push(this); }
     closeIn() { this.closedIn = true; }
+    focusOn(id: string | null) { this.focus.push(id); }
     update() {}
     setRoofVisible() {}
     setFaded() {}
@@ -27,7 +29,7 @@ vi.mock('../render/SiteScene', () => ({
   },
 }));
 
-const villa = readFileSync(resolve(process.cwd(), 'public/data/villa.json'), 'utf8');
+const level = (name: string) => readFileSync(resolve(process.cwd(), 'public/data', name), 'utf8');
 const click = (id: string) => fireEvent.click(document.getElementById(id)!);
 const lastView = () => scenes[scenes.length - 1].views.at(-1)!;
 
@@ -35,7 +37,7 @@ beforeEach(() => {
   scenes.length = 0;
   localStorage.clear();
   localStorage.setItem('power-sim:progress:v1', JSON.stringify({ 'level-circuit': { score: 3, stars: 3 }, 'level-room': { score: 3, stars: 3 } }));
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(villa, { status: 200 })));
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(level(url.split('/').pop()!), { status: 200 })));
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({} as never);
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -78,7 +80,7 @@ describe('Building the villa in 3D', () => {
     for (const id of ['C1', 'C2', 'C3']) click(`pick-${id}`);
     act(() => scenes[scenes.length - 1].onPick('room', 'C4')); // a click on the room in the 3D view
     expect(screen.getByText('4 of 8 rooms wired')).toBeTruthy();
-    expect(lastView().rooms.C4).toEqual({ wired: true, text: '6 A · 2.5 mm²' });
+    expect(lastView().rooms.C4).toEqual({ wired: true, text: '6 A · 2.5 mm²', phase: null }); // one phase: no phase tag
     expect(document.getElementById('pick-C4')!.className).toContain('on');
 
     act(() => scenes[scenes.length - 1].onMiss()); // a click on the lawn
@@ -125,5 +127,69 @@ describe('Building the villa in 3D', () => {
     const at = trip.getAttribute('aria-label')!.slice(0, 5);
     expect(document.getElementById('hour')!.getAttribute('aria-valuetext')).toBe(at);
     expect(document.getElementById('play')!.textContent).toBe('Resume');
+  });
+});
+
+describe('Building two villas in 3D', () => {
+  const open = async () => {
+    localStorage.setItem('power-sim:progress:v1', JSON.stringify({
+      'level-circuit': { score: 3, stars: 3 }, 'level-room': { score: 3, stars: 3 }, 'level-1-villa': { score: 955, stars: 3 },
+    }));
+    render(<App />);
+    await screen.findByText('0 of 12 rooms wired');
+  };
+  const status = () => screen.getByRole('status').textContent;
+
+  it('puts each board on its own spot, then feeds each villa from the pillar', async () => {
+    await open();
+    expect(document.getElementById('view-3d')!.getAttribute('aria-pressed')).toBe('true');
+
+    click('tool-board-FP');
+    expect(lastView().targets).toBe('boards'); // the pillar's spot pulses, not the rooms
+    expect(lastView().ghostBoard).toBe('FP');
+    click('pick-A1');
+    expect(status()).toBe("The Feeder pillar has its own spot: click the Feeder pillar's spot.");
+    click('pick-board-FP');
+    click('tool-board-VA');
+    click('pick-A3');
+    expect([lastView().boards.FP.placed, lastView().boards.VA.placed, lastView().boards.VB.placed]).toEqual([true, true, false]);
+
+    click('tool-supply');
+    click('pick-board-FP');
+    click('tool-cable-16');
+    click('pick-board-VA');
+    expect(lastView().boards.VA.fed).toBe(true);
+    click('pick-A1');
+    expect(lastView().rooms.A1).toMatchObject({ wired: true, phase: 'L1' });
+    expect(lastView().boards.VA.text).toMatch(/^L1 \d+ · L2 0 · L3 0 A$/);
+
+    click('tool-cable-16'); // put it down
+    click('pick-board-VA');
+    const card = within(screen.getByRole('region', { name: 'Villa A' }));
+    expect(card.getByText(/Feeder cable, 30 m/)).toBeTruthy();
+    fireEvent.change(document.getElementById('feeder-VA')!, { target: { value: '25' } });
+    expect(lastView().boards.VA.fed).toBe(true);
+  });
+
+  it('moves rooms onto a phase with the phase brush', async () => {
+    await open();
+    expect(document.getElementById('tool-phase-L2')!.textContent).toContain('0 rooms');
+    click('tool-phase-L2');
+    click('pick-A2');
+    click('pick-B2');
+    click('tool-phase-L3');
+    click('pick-A3');
+    expect(lastView().rooms.A2.phase).toBe('L2');
+    expect(lastView().rooms.A3.phase).toBe('L3');
+    expect(document.getElementById('tool-phase-L2')!.textContent).toContain('2 rooms');
+    expect(document.getElementById('tool-phase-L3')!.textContent).toContain('1 room');
+    expect(document.getElementById('pick-A2')!.textContent).toContain('L2');
+  });
+
+  it('looks at one villa up close, or the whole site', async () => {
+    await open();
+    click('focus-VB');
+    click('focus-site');
+    expect(scenes[scenes.length - 1].focus.slice(-2)).toEqual(['VB', null]);
   });
 });

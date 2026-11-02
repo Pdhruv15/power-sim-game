@@ -207,8 +207,8 @@ function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
   const layout = useLayout(design);
   const threePhase = design.boards.some(b => b.phases === 3);
   const pv = totalSolarKw(design);
-  // A site with one board plays out close in on the house, the view it was built in
-  const closeUp = !level.boards.some(b => b.parent !== null);
+  // Villas play out close in, the view they were built in. Buildings and villages keep the whole tile in view.
+  const closeUp = !level.boards.some(b => (b.floor ?? 0) > 0 || b.row !== undefined);
 
   return (
     <main className="app">
