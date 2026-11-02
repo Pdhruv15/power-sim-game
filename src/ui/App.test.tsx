@@ -391,6 +391,38 @@ describe('Level 1 flow', () => {  it('runs the day, shows the mistakes, and give
     expect(floors.getByRole('button', { name: '1' }).getAttribute('aria-pressed')).toBe('true');
   });
 
+  it('plays a power mix: solar alone goes dark at night, a balanced mix earns three stars', async () => {
+    localStorage.setItem('power-sim:progress:v1', JSON.stringify({
+      ...STARTER_DONE, 'level-1-villa': { score: 905, stars: 3 }, 'level-2-two-villas': { score: 800, stars: 2 }, 'level-services': { score: 800, stars: 2 },
+      'level-3-building': { score: 800, stars: 2 }, 'level-4-village': { score: 800, stars: 2 },
+    }));
+    render(<App />);
+    expect(await screen.findByText(/Level 8 · Valley villages · Power mix/)).toBeTruthy();
+    expect(document.getElementById('source-coal')!.textContent).toMatch(/Later level/);
+    const click = (id: string, times = 1) => { for (let i = 0; i < times; i++) fireEvent.click(document.getElementById(id)!); };
+
+    click('more-solar', 10);
+    expect(document.getElementById('source-solar')!.textContent).toMatch(/5 MW/);
+    click('power-on');
+    expect(screen.getByRole('heading', { name: 'The lights went out' })).toBeTruthy();
+    expect(screen.getAllByText(/the sun was down/)).toHaveLength(2); // once for each day
+    expect(screen.getByRole('button', { name: 'Calm, grey day ✕' })).toBeTruthy();
+
+    click('change-mix');
+    click('more-wind', 6);
+    click('more-hydro', 2);
+    click('more-battery');
+    click('more-diesel', 3);
+    click('power-on');
+    expect(screen.getByRole('heading', { name: 'The lights stayed on!' })).toBeTruthy();
+    expect(document.querySelector('.score .stars')!.getAttribute('aria-label')).toBe('3 of 3 stars');
+    expect(document.getElementById('reading-hz')!.textContent).toBe('50.0 Hz');
+    expect(document.querySelector('.world-map li.lit:last-child')).toBeNull(); // Big city is still to come
+    expect(screen.getByText('Villages').closest('li')!.className).toBe('lit');
+    click('next-level');
+    expect(await screen.findByText(/Level 9 · Small city · Power mix/)).toBeTruthy();
+  });
+
   it('shows level file problems instead of a blank screen', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"project":"x"}', { status: 200 })));
     render(<App />);

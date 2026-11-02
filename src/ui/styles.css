@@ -374,3 +374,48 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .load-day i { flex: 1; background: var(--accent); }
 .load-detail small { color: var(--muted); font-size: 11px; }
 .part-state.starts { color: var(--high); }
+
+/* Power mix */
+.src-solar { --src: #f2c94c; } .src-wind { --src: #7fd3e6; } .src-hydro { --src: #3d8bfd; } .src-battery { --src: #b18cf2; }
+.src-diesel { --src: #9aa3ad; } .src-gas { --src: #f08a3c; } .src-biomass { --src: #8bc34a; } .src-coal { --src: #6d6259; }
+.src-geothermal { --src: #e0675a; } .src-nuclear { --src: #2fd0c0; }
+.sources { gap: 12px; }
+.source-group h3 { margin: 0 0 6px; font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+.source-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.source-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "head head" "facts step"; align-items: center; gap: 4px 8px; background: var(--panel-2); border: 1px solid var(--line); border-left: 4px solid var(--src); border-radius: 4px; padding: 7px 8px; }
+.source-card .part-icon { color: var(--src); }
+.source-card.built { border-color: var(--src); }
+.source-card.locked { opacity: .45; border-left-color: var(--off); }
+.source-card.locked .part-icon { color: var(--off); }
+.source-text { display: flex; flex-direction: column; min-width: 0; }
+.source-text b { font-size: 13px; }
+.source-text small, .source-card .later { font-size: 11px; color: var(--muted); }
+.source-head { grid-area: head; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.source-card .stepper, .source-card .later { grid-area: step; justify-self: end; }
+.source-facts { grid-area: facts; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.stepper { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.stepper button { width: 24px; height: 24px; background: none; border: 0; color: var(--fg); font-size: 15px; cursor: pointer; }
+.stepper button:disabled { color: var(--off); cursor: default; }
+.stepper button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.stepper output { min-width: 52px; text-align: center; font-family: var(--mono); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.mix-chart { width: 100%; height: auto; display: block; }
+.mix-chart rect { fill: var(--src); }
+.mix-chart rect.short { fill: var(--high); opacity: .85; }
+.mix-chart rect.charging { fill: color-mix(in srgb, var(--bg) 55%, transparent); stroke: #b18cf2; stroke-width: 1.5; stroke-dasharray: 3 2; }
+.mix-legend i.charging { background: none; border: 1.5px dashed #b18cf2; }
+.mix-chart .demand { fill: none; stroke: var(--fg); stroke-width: 2; }
+.mix-chart .axis { stroke: var(--line); }
+.mix-chart text { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
+.mix-readings { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 0; }
+.mix-readings div { background: var(--panel-2); border: 1px solid var(--line); border-top: 3px solid var(--ok); border-radius: 4px; padding: 6px 8px; }
+.mix-readings div.bad { border-top-color: var(--high); }
+.mix-readings dt { font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.mix-readings dd { margin: 2px 0 0; font-family: var(--display); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mix-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; color: var(--muted); }
+.mix-legend li { display: flex; align-items: center; gap: 5px; }
+.mix-legend i { width: 10px; height: 10px; border-radius: 2px; background: var(--src); }
+.mix-legend i.demand { height: 2px; background: var(--fg); }
+.mix-legend i.short { background: var(--high); }
+.star-goals li.ok span { color: var(--ok); }
+.star-goals li.bad span { color: var(--high); }
+.small { font-size: 12px; margin: 0; }

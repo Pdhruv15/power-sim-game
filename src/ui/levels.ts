@@ -3,7 +3,7 @@ export interface LevelEntry {
   id: string;
   number: number;
   title: string;
-  /** Level file for a design level. Workshop levels are built from src/game/workshop.ts instead. */
+  /** Level file for a design level. Workshop and power-mix levels are built from src/game instead. */
   file?: string;
   /** A design level the player builds from an empty plan: what the build asks of them. */
   buildGoal?: string;
@@ -26,6 +26,10 @@ export const LEVELS: readonly LevelEntry[] = [
   },
   { id: 'level-3-building', number: 6, title: 'Apartment building', file: 'data/building.json' },
   { id: 'level-4-village', number: 7, title: 'Village', file: 'data/village.json' },
+  // Power-mix levels are built from src/game/mix.ts
+  { id: 'level-mix-valley', number: 8, title: 'Valley villages' },
+  { id: 'level-mix-city', number: 9, title: 'Small city' },
+  { id: 'level-mix-metro', number: 10, title: 'Big city' },
 ];
 
 /** The world the player lights up, step by step. Steps with no level yet are still to come. */
@@ -36,7 +40,7 @@ export const WORLD_MAP: readonly { name: string; level?: string }[] = [
   { name: 'Street', level: 'level-2-two-villas' },
   { name: 'Block', level: 'level-services' },
   { name: 'Village', level: 'level-4-village' },
-  { name: 'Villages' },
-  { name: 'Small city' },
-  { name: 'Big city' },
+  { name: 'Villages', level: 'level-mix-valley' },
+  { name: 'Small city', level: 'level-mix-city' },
+  { name: 'Big city', level: 'level-mix-metro' },
 ];
