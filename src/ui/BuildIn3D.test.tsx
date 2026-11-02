@@ -7,14 +7,16 @@ import type { BuildView } from '../render/SiteScene';
 import { App } from './App';
 
 // jsdom has no WebGL, so a stand-in scene records what the game asks it to show
-const scenes = vi.hoisted(() => [] as { onPick: (kind: 'room' | 'board', id: string) => void; onMiss: () => void; views: BuildView[] }[]);
+const scenes = vi.hoisted(() => [] as { onPick: (kind: 'room' | 'board', id: string) => void; onMiss: () => void; views: BuildView[]; closedIn: boolean }[]);
 vi.mock('../render/SiteScene', () => ({
   SiteScene: class {
     onPick: (kind: 'room' | 'board', id: string) => void = () => {};
     onMiss = () => {};
     onRoomClick = () => {};
     views: BuildView[] = [];
+    closedIn = false;
     constructor() { scenes.push(this); }
+    closeIn() { this.closedIn = true; }
     update() {}
     setRoofVisible() {}
     setFaded() {}
@@ -113,5 +115,15 @@ describe('Building the villa in 3D', () => {
 
     click('power-on');
     expect(await screen.findByText('Running the day')).toBeTruthy();
+    expect(scenes[scenes.length - 1].closedIn).toBe(true); // the day plays out in the view it was built in
+
+    // Too-small breakers trip: each event is marked on the time bar, and a mark jumps the replay there
+    const marks = within(screen.getByRole('group', { name: 'What happened' })).getAllByRole('button');
+    expect(marks.length).toBeGreaterThan(0);
+    const trip = marks.find(m => /tripped/.test(m.getAttribute('aria-label')!))!;
+    fireEvent.click(trip);
+    const at = trip.getAttribute('aria-label')!.slice(0, 5);
+    expect(document.getElementById('hour')!.getAttribute('aria-valuetext')).toBe(at);
+    expect(document.getElementById('play')!.textContent).toBe('Resume');
   });
 });

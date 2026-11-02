@@ -5,6 +5,7 @@ import { PHASES, topBoard, TRANSFORMER_ID, type Board, type Circuit, type Level,
 import { STATUS, statusColor } from './colors';
 import { boardLabelVisible, inBlackout, roomLabelVisible, type LabelMode, type RoomState } from './labelRules';
 import { CABLE_DEPTH, Landscape } from './Landscape';
+import { roomGlow } from './lamps';
 import { Sky } from './Sky';
 import { layoutLandscape, PAVEMENT_WIDTH, ROAD_WIDTH, type Rect } from './landscapeLayout';
 
@@ -29,7 +30,9 @@ const MARKER_LIFT = 1.7;
 
 /** Build mode only: room still to wire, and room wired. */
 const TO_WIRE = 0x63b3ff, WIRED = 0xf0a531;
+/** How close the view comes in on one house, when building and when its day runs. */
 const BUILD_ZOOM = 2;
+const LAMP = 0xffd58a;
 
 /** What the player has built so far, while building the site in 3D. */
 export interface BuildView {
@@ -52,6 +55,9 @@ interface RoomParts {
   bandMat: THREE.MeshBasicMaterial;
   cableMat: THREE.MeshBasicMaterial;
   cables: THREE.Mesh[];
+  /** Ceiling light, and the pool of light it throws on the floor after dark. */
+  lamp: THREE.Mesh;
+  pool: THREE.Mesh;
   marker: THREE.Mesh;
   markerY: number;
   label: HTMLDivElement;
@@ -195,6 +201,9 @@ export class SiteScene {
       rm.bandMat.color.copy(col);
       rm.cableMat.color.copy(col);
       rm.marker.visible = c.tripped;
+      const glow = roomGlow(c.dead, c.demandKw, day);
+      rm.lamp.visible = rm.pool.visible = glow > 0;
+      (rm.pool.material as THREE.MeshBasicMaterial).opacity = 0.5 * glow;
       const state = c.tripped ? 'TRIPPED' : c.dead ? 'no supply' : c.overloaded ? `${c.amps.toFixed(1)} A · OVERLOAD` : `${c.amps.toFixed(1)} / ${c.breakerA} A`;
       rm.state = { band: c.band, overloaded: c.overloaded, tripped: c.tripped, dead: c.dead };
       rm.label.className = `scene-label st-${c.dead ? 'off' : c.band}${c.tripped || c.overloaded ? ' alarm' : ''}`;
@@ -216,6 +225,12 @@ export class SiteScene {
     this.refreshLabels();
   }
 
+  /** Close in on the house, as when building it, so its day plays out in the same view. */
+  closeIn(): void {
+    this.camera.zoom = BUILD_ZOOM;
+    this.camera.updateProjectionMatrix();
+  }
+
   /**
    * Build mode: show what the player has built instead of the simulation's colours. The view stops turning,
    * cables appear only once laid, and what the part in hand can be used on pulses. Null leaves build mode;
@@ -223,10 +238,7 @@ export class SiteScene {
    */
   setBuildView(view: BuildView | null): void {
     // Coming into build mode, close in on the house so every room is big enough to click
-    if (view && !this.build) {
-      this.camera.zoom = BUILD_ZOOM;
-      this.camera.updateProjectionMatrix();
-    }
+    if (view && !this.build) this.closeIn();
     this.build = view;
     this.controls.enableRotate = view === null;
     this.controls.minZoom = view ? 0.8 : 0.45;
@@ -539,6 +551,14 @@ export class SiteScene {
         box(0.07, 0.07, Math.abs(cz - lane), cableMat, cx, cy, (cz + lane) / 2, g, false),
       ];
 
+      // Lights for after dark: a lamp under the ceiling line and the warm pool it throws on the floor
+      const lamp = box(0.7, 0.06, 0.7, new THREE.MeshBasicMaterial({ color: LAMP }), cx, BASE + WALL_H - 0.2, cz, g, false);
+      const pool = new THREE.Mesh(new THREE.CircleGeometry(ROOM * 0.4, 28), new THREE.MeshBasicMaterial({ color: LAMP, transparent: true, opacity: 0, depthWrite: false }));
+      pool.rotation.x = -Math.PI / 2;
+      pool.position.set(cx, BASE + 0.08, cz);
+      lamp.visible = pool.visible = false;
+      g.add(pool);
+
       const markerY = BASE + WALL_H + MARKER_LIFT;
       const marker = tripMarker(cx, markerY, cz, g);
       const label = this.addLabel(g, c.room, new THREE.Vector3(cx, BASE + WALL_H + 0.7, cz), 'scene-label');
@@ -548,7 +568,7 @@ export class SiteScene {
 
       for (const m of [floorMesh, ...walls]) { m.userData.circuitId = c.id; m.userData.floor = floor; this.pickRooms.push(m); }
       this.rooms.set(c.id, {
-        floorMat, wallMat, bandMat, cableMat, cables, marker, markerY, label, labelObj: this.labelObjs.get(label)!, floor,
+        floorMat, wallMat, bandMat, cableMat, cables, lamp, pool, marker, markerY, label, labelObj: this.labelObjs.get(label)!, floor,
         state: { band: 'ok', overloaded: false, tripped: false, dead: false },
       });
     });

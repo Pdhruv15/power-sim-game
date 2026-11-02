@@ -191,6 +191,12 @@ function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
     setExploreResult(explore.result());
   };
   const resetBreakers = () => { explore.resetBreakers(); setExploreResult(explore.result()); };
+  /** Replay: go straight to a moment marked on the time bar, paused there. */
+  const jumpTo = (h: number) => {
+    if (phase.kind === 'design') return;
+    setPlaying(false);
+    setFrame(Math.min(phase.day.frames.length - 1, Math.round(h / DAY_STEP_HOURS)));
+  };
   const toggleRoom = useCallback((id: string) => setFaded(prev => {
     const next = new Set(prev);
     if (!next.delete(id)) next.add(id);
@@ -201,6 +207,8 @@ function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
   const layout = useLayout(design);
   const threePhase = design.boards.some(b => b.phases === 3);
   const pv = totalSolarKw(design);
+  // A site with one board plays out close in on the house, the view it was built in
+  const closeUp = !level.boards.some(b => b.parent !== null);
 
   return (
     <main className="app">
@@ -232,7 +240,7 @@ function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
           <div className="stage-wrap">
             <Stage
               level={layout} result={result} roofOn={roofOn} faded={faded} labelMode={labelMode} floorLimit={floorLimit}
-              onRoomClick={toggleRoom}
+              onRoomClick={toggleRoom} closeUp={closeUp}
             />
             <Kpis result={result} solarKwp={pv} />
             <ViewBar labelMode={labelMode} onLabelMode={setLabelMode} floors={floors} floorLimit={floorLimit} onFloorLimit={setFloorLimit} />
@@ -243,6 +251,7 @@ function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
             onHour={setExploreHour} onPlay={() => (phase.kind === 'score' ? replay() : setPlaying(p => !p))}
             onRoof={() => setRoofOn(r => !r)}
             onSecondary={phase.kind === 'design' ? resetBreakers : finishRun}
+            events={phase.kind === 'design' ? undefined : phase.day.events} onJump={jumpTo}
           />
           <p className="hint-line">Drag to rotate · scroll to zoom · right-drag to pan · point at a room for details</p>
           {phase.kind !== 'design' && <LoadChart level={design} day={phase.day} hour={result.hour} />}
