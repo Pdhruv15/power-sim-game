@@ -25,7 +25,10 @@ export const LEVELS: readonly LevelEntry[] = [
     buildGoal: 'Feed the services of a small block. Look each load up in the library: motors pull far more to start than to run, so their breakers need room for the surge.',
   },
   { id: 'level-3-building', number: 6, title: 'Apartment building', file: 'data/building.json' },
-  { id: 'level-4-village', number: 7, title: 'Village', file: 'data/village.json' },
+  {
+    id: 'level-4-village', number: 7, title: 'Village', file: 'data/village.json',
+    buildGoal: 'Build the village power: pick the transformer, place the village board and the lane pillars, then feed each home, the school and the shop. Homes are single-phase, so spread them over L1, L2 and L3.',
+  },
   // Power-mix levels are built from src/game/mix.ts
   { id: 'level-mix-valley', number: 8, title: 'Valley villages' },
   { id: 'level-mix-city', number: 9, title: 'Small city' },

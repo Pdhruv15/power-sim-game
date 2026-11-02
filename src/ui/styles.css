@@ -216,11 +216,21 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* ---------- workshop levels ---------- */
 .coins-line b { font-family: var(--display); font-size: 24px; font-weight: 700; color: var(--warn); }
-.world-map { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
-.world-map li { display: flex; align-items: center; gap: 6px; }
-.world-map i { width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--off); }
-.world-map li.lit { color: var(--fg); }
-.world-map li.lit i { background: var(--warn); border-color: var(--warn); box-shadow: 0 0 6px var(--warn); }
+.world-map { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; }
+.world-map button { width: 100%; display: grid; justify-items: center; gap: 1px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 4px 6px; color: var(--muted); cursor: pointer; font-family: var(--mono); font-size: 11px; }
+.world-map button:hover:not(:disabled) { border-color: var(--accent); }
+.world-map button:disabled { cursor: default; opacity: .55; }
+.world-map button[aria-current="step"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.world-map button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.world-map .map-name { color: var(--fg); font-family: var(--body); font-size: 12px; font-weight: 600; }
+.world-map small { font-size: 10.5px; letter-spacing: 1px; color: var(--muted); }
+.world-map li.lit small { color: var(--warn); }
+.map-tile { width: 64px; height: 66px; }
+.map-tile .ground { fill: #2b3a2c; stroke: #3d5140; stroke-width: .6; }
+.map-tile .wall-l { fill: #3a434c; } .map-tile .wall-r { fill: #303840; } .map-tile .roof { fill: #4a545e; }
+.world-map li.lit .map-tile .ground { fill: #4f7a3c; stroke: #6f9a4f; }
+.world-map li.lit .map-tile .wall-l { fill: #e2d9c6; } .world-map li.lit .map-tile .wall-r { fill: #c9bfab; } .world-map li.lit .map-tile .roof { fill: #f0a531; }
+.map-tile .glow { fill: var(--warn); }
 
 .tray { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
 .tray-items { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; }
@@ -461,11 +471,12 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .event-mark.past { opacity: 1; }
 .event-mark:hover, .event-mark:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; opacity: 1; }
 /* Phases in the 3D build: the usual brown, black and grey */
-.scene-label.build[data-phase]::after { content: attr(data-phase); display: block; width: max-content; margin: 2px auto 0; padding: 0 5px; border-radius: 2px; font-size: 10px; font-weight: 600; }
-.scene-label.build[data-phase="L1"]::after, .ph-tag.ph-L1, .hot-slot.phase.ph-L1 i { background: #8a4f24; color: #fff; }
-.scene-label.build[data-phase="L2"]::after, .ph-tag.ph-L2, .hot-slot.phase.ph-L2 i { background: #0b0b0b; color: #fff; box-shadow: inset 0 0 0 1px #6d7780; }
-.scene-label.build[data-phase="L3"]::after, .ph-tag.ph-L3, .hot-slot.phase.ph-L3 i { background: #8b939a; color: #0e1318; }
+.scene-label[data-phase]::after { content: attr(data-phase); display: block; width: max-content; margin: 2px auto 0; padding: 0 5px; border-radius: 2px; font-size: 10px; font-weight: 600; }
+.scene-label[data-phase="L1"]::after, .ph-tag.ph-L1, .hot-slot.phase.ph-L1 i { background: #8a4f24; color: #fff; }
+.scene-label[data-phase="L2"]::after, .ph-tag.ph-L2, .hot-slot.phase.ph-L2 i { background: #0b0b0b; color: #fff; box-shadow: inset 0 0 0 1px #6d7780; }
+.scene-label[data-phase="L3"]::after, .ph-tag.ph-L3, .hot-slot.phase.ph-L3 i { background: #8b939a; color: #0e1318; }
 .ph-tag { font-style: normal; font-size: 10px; font-weight: 600; padding: 0 4px; border-radius: 2px; }
 .hot-slot.phase i { font-style: normal; font-family: var(--mono); font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 3px; margin-bottom: 2px; }
 .pick-group { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; }
 .focus-pick { position: absolute; top: 10px; right: 10px; z-index: 2; }
+.focus-select { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); background: color-mix(in srgb, var(--bg) 82%, transparent); border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; }

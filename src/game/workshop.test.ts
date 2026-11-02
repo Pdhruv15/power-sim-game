@@ -357,3 +357,31 @@ describe('building a site with parts in hand', () => {
     expect(applySiteTool(v, newSiteBuild(v, 63, 16), { kind: 'phase', phase: 'L2' }, { kind: 'room', id: 'C1' }).tip).toBe('Villa DB is single-phase, so every room on it is on L1.');
   });
 });
+describe('building the village', () => {
+  const village = (): Level => parseLevel(JSON.parse(readFileSync(new URL('../../public/data/village.json', import.meta.url), 'utf8')));
+
+  it('starts with the smallest transformer, and a single-phase home takes one phase as a whole', () => {
+    const l = village();
+    const b = newSiteBuild(l, 63, 16);
+    expect(b.transformerKva).toBe(50);
+    expect(applySiteTool(l, b, { kind: 'phase', phase: 'L2' }, { kind: 'room', id: 'H2-1' }).tip)
+      .toBe('Home 2 is single-phase, so all its rooms share one phase. Click the Home 2 board to pick it.');
+    const r = applySiteTool(l, b, { kind: 'phase', phase: 'L2' }, { kind: 'board', id: 'H2' });
+    expect(r.build!.boards.H2.phase).toBe('L2');
+    expect(applySiteTool(l, b, { kind: 'phase', phase: 'L3' }, { kind: 'room', id: 'SCH-1' }).build!.rooms['SCH-1'].phase).toBe('L3');
+  });
+
+  it('carries the transformer size and each home phase into the design', () => {
+    const l = village();
+    const b = newSiteBuild(l, 63, 16);
+    b.supplyWired = true;
+    b.transformerKva = 100;
+    for (const x of l.boards) b.boards[x.id] = { ...b.boards[x.id], placed: true, mm2: x.parent ? 16 : null };
+    for (const c of l.circuits) b.rooms[c.id].mm2 = 4;
+    b.boards.H2.phase = 'L2';
+    const { design } = siteDesign(l, b);
+    expect(design!.transformer!.kva).toBe(100);
+    expect(design!.boards.find(x => x.id === 'H2')!.phase).toBe('L2');
+    expect(design!.boards.find(x => x.id === 'H1')!.phase).toBe('L1');
+  });
+});

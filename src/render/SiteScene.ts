@@ -31,13 +31,13 @@ const MARKER_LIFT = 1.7;
 /** Build mode only: room still to wire, and room wired. */
 const TO_WIRE = 0x63b3ff, WIRED = 0xf0a531;
 /** How close the view comes in on one house. A site of a few houses comes in less, to keep them all in view. */
-const HOUSE_ZOOM = 2, SITE_ZOOM = 1.5;
+const HOUSE_ZOOM = 2, SITE_ZOOM = 1.5, VILLAGE_ZOOM = 1.45;
 const LAMP = 0xffd58a;
 
 /** What the player has built so far, while building the site in 3D. */
 export interface BuildView {
   /** Per board: placed yet, its feeder cable laid, and the line under its name. */
-  boards: Readonly<Record<string, { placed: boolean; fed: boolean; name: string; text: string }>>;
+  boards: Readonly<Record<string, { placed: boolean; fed: boolean; name: string; text: string; phase?: Phase | null }>>;
   supplyWired: boolean;
   /** Per room: its cable laid, the line under its name, and its phase on a three-phase board. */
   rooms: Readonly<Record<string, { wired: boolean; text: string; phase: Phase | null }>>;
@@ -78,6 +78,8 @@ interface BoardParts {
   hit: THREE.Mesh | null;
   /** Where the label sits outside build mode. */
   labelAt: THREE.Vector3;
+  /** Village homes: a light on the roof line showing the home's status from the street. */
+  beacon?: THREE.MeshBasicMaterial;
   marker: THREE.Mesh;
   markerY: number;
   label: HTMLDivElement;
@@ -222,6 +224,7 @@ export class SiteScene {
       const bp = this.boards.get(b.id);
       if (!bp) continue;
       bp.cableMat?.color.copy(statusColor(b.band, b.dead));
+      bp.beacon?.color.copy(statusColor(b.band, b.dead));
       bp.marker.visible = b.tripped;
       const amps = b.phases === 3
         ? PHASES.map((p, i) => `${p} ${Math.abs(b.phaseAmps[i]).toFixed(0)}`).join(' · ') + ' A'
@@ -293,10 +296,13 @@ export class SiteScene {
       }
       for (const m of bp.feeder) m.visible = b.fed;
       bp.cableMat?.color.set(WIRED);
+      bp.beacon?.color.set(b.placed ? WIRED : STATUS.off);
       bp.marker.visible = false;
       bp.label.className = `scene-label tag build${id === view.selected ? ' sel' : ''}`;
       bp.label.firstChild!.textContent = b.name;
       bp.label.lastChild!.textContent = b.text;
+      if (b.phase) bp.label.dataset.phase = b.phase;
+      else delete bp.label.dataset.phase;
     }
     if (this.supply) {
       for (const m of this.supply.meshes) m.visible = view.supplyWired;
@@ -435,6 +441,13 @@ export class SiteScene {
         if (f > 0) this.floorObjects.push({ floor: f, obj: g });
         const db = this.buildVilla(g, b, level.circuits.filter(c => c.board === b.id), units.length > 1, f === topFloor);
         this.unitAt.set(b.id, g.position.clone());
+        if (village) {
+          const beacon = new THREE.MeshBasicMaterial({ color: STATUS.off });
+          const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.32, 14, 10), beacon);
+          bulb.position.set(-W / 2 + 0.4, BASE + WALL_H + 0.5, 0);
+          g.add(bulb);
+          this.boards.get(b.id)!.beacon = beacon;
+        }
         dbAt.set(b.id, db.add(g.position));
         if (!building || l === lines[0]) footprints.push(around(g.position.x, g.position.z, W / 2 + 0.3, sizeOf.get(b.id)!.D / 2 + 0.3));
         x += W + gap;
@@ -504,7 +517,7 @@ export class SiteScene {
     this.panLimit = tileSpan * 0.45;
     this.controls.target.set(0, height / 2, 0);
     this.home.copy(this.controls.target);
-    this.closeZoom = building || village ? 1 : units.length === 1 ? HOUSE_ZOOM : SITE_ZOOM;
+    this.closeZoom = building ? 1 : village ? VILLAGE_ZOOM : units.length === 1 ? HOUSE_ZOOM : SITE_ZOOM;
     this.addLabel(this.scene, 'N ↑', new THREE.Vector3(0, 0, backZ - 4), 'scene-label tag'); // north is world −z
   }
 
@@ -526,6 +539,12 @@ export class SiteScene {
     box(top.x - at.x, 0.06, 0.18, statusMat, (at.x + top.x) / 2, 0.06, at.z, this.site, false);
     const parts = this.boardParts({ name, parent: null }, new THREE.Vector3(at.x, 3.6, at.z), null);
     parts.cableMat = statusMat;
+    // Build mode: the transformer can be clicked, to pick its size
+    const hit = new THREE.Mesh(new THREE.BoxGeometry(4, 3, 3), new THREE.MeshBasicMaterial({ visible: false }));
+    hit.position.set(at.x, 1.4, at.z);
+    hit.userData.boardId = TRANSFORMER_ID;
+    this.site.add(hit);
+    this.pickBoards.push(hit);
     this.boards.set(TRANSFORMER_ID, parts);
   }
 

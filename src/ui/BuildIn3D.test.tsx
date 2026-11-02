@@ -69,7 +69,7 @@ describe('Building the villa in 3D', () => {
     expect(lastView().ghostBoards).toBe(true);
     click('pick-C3');
     expect(lastView().boards.DB.placed).toBe(true);
-    expect((document.getElementById('tool-board-DB') as HTMLButtonElement).disabled).toBe(true);
+    expect(document.getElementById('tool-board-DB')).toBeNull(); // placed, so its slot has gone
 
     click('tool-supply');
     expect(lastView().targets).toBe('boards');
@@ -191,5 +191,42 @@ describe('Building two villas in 3D', () => {
     click('focus-VB');
     click('focus-site');
     expect(scenes[scenes.length - 1].focus.slice(-2)).toEqual(['VB', null]);
+  });
+});
+
+describe('Building the village in 3D', () => {
+  const open = async () => {
+    const done = { score: 800, stars: 2 };
+    localStorage.setItem('power-sim:progress:v1', JSON.stringify({
+      'level-circuit': done, 'level-room': done, 'level-1-villa': done, 'level-2-two-villas': done, 'level-services': done, 'level-3-building': done,
+    }));
+    render(<App />);
+    await screen.findByText('0 of 18 rooms wired');
+  };
+
+  it('picks the transformer size, and puts each single-phase home on a phase with the brush', async () => {
+    await open();
+    expect(document.getElementById('view-3d')!.getAttribute('aria-pressed')).toBe('true');
+    expect(document.getElementById('pick-transformer')!.textContent).toContain('50 kVA');
+    click('pick-transformer');
+    expect(within(screen.getByRole('region', { name: 'Village transformer' })).getByText(/busiest phase: \d+ % of this size/)).toBeTruthy();
+    fireEvent.change(document.getElementById('tx-kva')!, { target: { value: '100' } });
+    expect(document.getElementById('pick-transformer')!.textContent).toContain('100 kVA');
+
+    click('tool-phase-L2');
+    click('pick-H2-1');
+    expect(screen.getByRole('status').textContent).toBe('Home 2 is single-phase, so all its rooms share one phase. Click the Home 2 board to pick it.');
+    click('pick-board-H2');
+    expect(lastView().boards.H2.phase).toBe('L2');
+    expect(document.getElementById('pick-board-H2')!.textContent).toContain('L2');
+    click('pick-transformer');
+    expect(screen.getByRole('status').textContent).toMatch(/^The transformer comes with the site/);
+  });
+
+  it('looks at any home from a list, since there are too many for buttons', async () => {
+    await open();
+    fireEvent.change(document.getElementById('focus-pick')!, { target: { value: 'SCH' } });
+    expect(scenes[scenes.length - 1].focus.at(-1)).toBe('SCH');
+    expect(lastView().roomLabels).toBe('SCH');
   });
 });
