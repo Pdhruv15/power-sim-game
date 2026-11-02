@@ -27,11 +27,31 @@ const PANEL_TILT = 20;           // degrees
 const FADED_OPACITY = 0.12;
 const MARKER_LIFT = 1.7;
 
+/** Build mode only: room still to wire, and room wired. */
+const TO_WIRE = 0x63b3ff, WIRED = 0xf0a531;
+const BUILD_ZOOM = 2;
+
+/** What the player has built so far, while building the site in 3D. */
+export interface BuildView {
+  /** Per board: placed yet, its feeder cable laid, and the line under its name. */
+  boards: Readonly<Record<string, { placed: boolean; fed: boolean; name: string; text: string }>>;
+  supplyWired: boolean;
+  /** Per room: its cable laid, and the line under its name. */
+  rooms: Readonly<Record<string, { wired: boolean; text: string }>>;
+  /** Room or board picked to change its sizes. */
+  selected: string | null;
+  /** What the part in hand can be used on. These pulse. */
+  targets: 'rooms' | 'boards' | null;
+  /** Show where boards not yet placed will go. */
+  ghostBoards: boolean;
+}
+
 interface RoomParts {
   floorMat: THREE.MeshStandardMaterial;
   wallMat: THREE.MeshStandardMaterial;
   bandMat: THREE.MeshBasicMaterial;
   cableMat: THREE.MeshBasicMaterial;
+  cables: THREE.Mesh[];
   marker: THREE.Mesh;
   markerY: number;
   label: HTMLDivElement;
@@ -42,6 +62,13 @@ interface RoomParts {
 
 interface BoardParts {
   cableMat: THREE.MeshBasicMaterial | null;
+  /** Feeder cable from the board above, if any. */
+  feeder: THREE.Mesh[];
+  /** The board's box, and the unseen box around it that catches clicks. */
+  cabinet: THREE.Mesh | null;
+  hit: THREE.Mesh | null;
+  /** Where the label sits outside build mode. */
+  labelAt: THREE.Vector3;
   marker: THREE.Mesh;
   markerY: number;
   label: HTMLDivElement;
@@ -59,6 +86,10 @@ interface BoardParts {
 export class SiteScene {
   /** Called when the player clicks a room (not a drag). */
   onRoomClick: (circuitId: string) => void = () => {};
+  /** Build mode: called when the player clicks a room or a board. */
+  onPick: (kind: 'room' | 'board', id: string) => void = () => {};
+  /** Build mode: called when a click lands on neither. */
+  onMiss: () => void = () => {};
 
   private renderer = new THREE.WebGLRenderer({ antialias: true });
   private labels = new CSS2DRenderer();
@@ -74,6 +105,8 @@ export class SiteScene {
   private boards = new Map<string, BoardParts>();
   private pickRooms: THREE.Object3D[] = [];
   private pickRoof: THREE.Object3D[] = [];
+  private pickBoards: THREE.Object3D[] = [];
+  private build: BuildView | null = null;
   private faded = new Set<string>();
   private labelMode: LabelMode = 'smart';
   private hovered: string | null = null;
@@ -88,7 +121,7 @@ export class SiteScene {
   private landscape: Landscape | null = null;
   private sky: Sky | null = null;
   /** Buried supply cable from the street network to the top board, seen in the tile's cut face. */
-  private supply: { mat: THREE.MeshBasicMaterial; labelObj: CSS2DObject } | null = null;
+  private supply: { mat: THREE.MeshBasicMaterial; labelObj: CSS2DObject; meshes: THREE.Mesh[] } | null = null;
   /** Furthest the view may pan from the site centre. */
   private panLimit = 30;
   private span = 20;
@@ -183,6 +216,62 @@ export class SiteScene {
     this.refreshLabels();
   }
 
+  /**
+   * Build mode: show what the player has built instead of the simulation's colours. The view stops turning,
+   * cables appear only once laid, and what the part in hand can be used on pulses. Null leaves build mode;
+   * the next update() brings the simulation's colours back.
+   */
+  setBuildView(view: BuildView | null): void {
+    // Coming into build mode, close in on the house so every room is big enough to click
+    if (view && !this.build) {
+      this.camera.zoom = BUILD_ZOOM;
+      this.camera.updateProjectionMatrix();
+    }
+    this.build = view;
+    this.controls.enableRotate = view === null;
+    this.controls.minZoom = view ? 0.8 : 0.45;
+    this.controls.maxZoom = view ? 2.5 : 4;
+    if (!view) return;
+    for (const [id, rm] of this.rooms) {
+      const r = view.rooms[id];
+      if (!r) continue;
+      for (const m of rm.cables) m.visible = r.wired;
+      const col = r.wired ? WIRED : TO_WIRE;
+      rm.floorMat.emissive.set(col);
+      rm.floorMat.emissiveIntensity = id === view.selected ? 0.9 : r.wired ? 0.45 : 0.3;
+      rm.bandMat.color.set(col);
+      rm.cableMat.color.set(WIRED);
+      rm.marker.visible = false;
+      rm.label.className = `scene-label build${r.wired ? ' wired' : ''}${id === view.selected ? ' sel' : ''}`;
+      rm.label.lastChild!.textContent = r.text;
+    }
+    for (const [id, bp] of this.boards) {
+      const b = view.boards[id];
+      if (!b) continue;
+      if (bp.cabinet) {
+        const m = bp.cabinet.material as THREE.MeshStandardMaterial;
+        bp.cabinet.visible = b.placed || view.ghostBoards;
+        if (bp.hit) bp.hit.visible = bp.cabinet.visible;
+        // A board inside a house shows its label past the west wall, clear of the room labels
+        if (bp.cabinet.parent !== this.site) bp.labelObj.position.set(bp.labelAt.x - 2.2, bp.labelAt.y - 0.6, bp.labelAt.z);
+        m.opacity = b.placed ? 1 : 0.35;
+        m.emissive.set(id === view.selected ? WIRED : TO_WIRE);
+        m.emissiveIntensity = id === view.selected ? 0.6 : 0;
+      }
+      for (const m of bp.feeder) m.visible = b.fed;
+      bp.cableMat?.color.set(WIRED);
+      bp.marker.visible = false;
+      bp.label.className = `scene-label tag build${id === view.selected ? ' sel' : ''}`;
+      bp.label.firstChild!.textContent = b.name;
+      bp.label.lastChild!.textContent = b.text;
+    }
+    if (this.supply) {
+      for (const m of this.supply.meshes) m.visible = view.supplyWired;
+      this.supply.mat.color.set(WIRED);
+    }
+    this.refreshLabels();
+  }
+
   /** Which room labels to show: smart (default), all, or off. */
   setLabelMode(mode: LabelMode): void {
     this.labelMode = mode;
@@ -209,6 +298,14 @@ export class SiteScene {
 
   /** Apply the label mode, hover, clicked rooms and hidden floors to every label. */
   private refreshLabels(): void {
+    const view = this.build;
+    if (view) {
+      // Building: every room's name and needs, and boards once placed
+      for (const rm of this.rooms.values()) rm.labelObj.visible = rm.floor <= this.floorLimit;
+      for (const [id, bp] of this.boards) bp.labelObj.visible = bp.floor <= this.floorLimit && (view.boards[id]?.placed ?? false);
+      if (this.supply) this.supply.labelObj.visible = view.supplyWired;
+      return;
+    }
     const blackout = this.boards.get(TRANSFORMER_ID)?.state.tripped ?? false;
     const shown = (s: RoomState) => (blackout ? inBlackout(s) : s);
     for (const [id, rm] of this.rooms) {
@@ -316,13 +413,13 @@ export class SiteScene {
         : village
           ? new THREE.Vector3(-rowW / 2 - (b.parent === null ? MAIN_WEST : PILLAR_WEST), 0, firstUnit ? Math.sign(lineZ(lineOf(firstUnit))) * LANE_CABLE_Z : 0)
           : new THREE.Vector3((i - (others.length - 1) / 2) * 4, 0, maxD / 2 + PILLAR_SETBACK);
-      const cabinet = box(0.9, 1.4, 0.5, mat(0x6f7a85, { metalness: 0.3 }), at.x, at.y + 0.7, at.z, this.site);
+      const cabinet = box(0.9, 1.4, 0.5, mat(0x6f7a85, { metalness: 0.3, transparent: true }), at.x, at.y + 0.7, at.z, this.site);
       if (floorOf(b) > 0) this.floorObjects.push({ floor: floorOf(b), obj: cabinet });
       dbAt.set(b.id, at);
       if (at.y === 0) keepClear.push(around(at.x, at.z, 0.45, 0.25));
       // On a riser the main board stands in front, so its label sits low, clear of the floor boards' labels
       const labelY = at.y + (building && b.parent === null ? 1.6 : 2.2);
-      this.boards.set(b.id, this.boardParts(b, new THREE.Vector3(at.x, labelY, at.z), null));
+      this.boards.set(b.id, this.boardParts(b, new THREE.Vector3(at.x, labelY, at.z), null, b.name, cabinet));
     });
 
     // Feeder cables: up the riser to the child's floor, along the parent's line, then across to the child's board
@@ -332,15 +429,17 @@ export class SiteScene {
       const cableMat = new THREE.MeshBasicMaterial({ color: STATUS.ok });
       const lift = building ? BASE + 0.1 : 0.06;
       const y0 = from.y + lift, y1 = to.y + lift, t = 0.18;
-      if (Math.abs(y1 - y0) > 0.01) box(t, Math.abs(y1 - y0), t, cableMat, from.x, (y0 + y1) / 2, from.z, this.site, false);
-      box(Math.abs(to.x - from.x) + t, t / 3, t, cableMat, (from.x + to.x) / 2, y1, from.z, this.site, false);
-      box(t, t / 3, Math.abs(from.z - to.z) + t, cableMat, to.x, y1, (from.z + to.z) / 2, this.site, false);
+      const feeder = [
+        ...(Math.abs(y1 - y0) > 0.01 ? [box(t, Math.abs(y1 - y0), t, cableMat, from.x, (y0 + y1) / 2, from.z, this.site, false)] : []),
+        box(Math.abs(to.x - from.x) + t, t / 3, t, cableMat, (from.x + to.x) / 2, y1, from.z, this.site, false),
+        box(t, t / 3, Math.abs(from.z - to.z) + t, cableMat, to.x, y1, (from.z + to.z) / 2, this.site, false),
+      ];
       if (y1 < 0.5) {
         keepClear.push({ minX: Math.min(from.x, to.x), maxX: Math.max(from.x, to.x), minZ: from.z - t, maxZ: from.z + t });
         keepClear.push({ minX: to.x - t, maxX: to.x + t, minZ: Math.min(from.z, to.z), maxZ: Math.max(from.z, to.z) });
       }
       const parts = this.boards.get(b.id);
-      if (parts) parts.cableMat = cableMat;
+      if (parts) Object.assign(parts, { cableMat, feeder });
     }
 
     // The transformer stands beside the top board, and the street supply comes to it instead
@@ -400,8 +499,8 @@ export class SiteScene {
 
     // Board at the west end of the corridor
     const dbX = -W / 2 + 0.35;
-    box(0.5, 1.2, 0.3, mat(0x7c8792, { metalness: 0.4 }), dbX - 0.15, BASE + 0.9, 0, g);
-    const parts = this.boardParts(board, new THREE.Vector3(dbX, BASE + 2, 0), g, showName ? board.name : `DB · ${board.breakerA} A`);
+    const cabinet = box(0.5, 1.2, 0.3, mat(0x7c8792, { metalness: 0.4, transparent: true }), dbX - 0.15, BASE + 0.9, 0, g);
+    const parts = this.boardParts(board, new THREE.Vector3(dbX, BASE + 2, 0), g, showName ? board.name : `DB · ${board.breakerA} A`, cabinet);
     this.boards.set(board.id, parts);
 
     circuits.forEach((c, i) => {
@@ -435,8 +534,10 @@ export class SiteScene {
       // Cable: board → along the corridor in its own lane → through the door to the room centre
       const cableMat = new THREE.MeshBasicMaterial({ color: STATUS.ok });
       const lane = side * (0.16 + col * 0.11), cy = BASE + 0.1;
-      box(Math.abs(cx - dbX), 0.07, 0.07, cableMat, (cx + dbX) / 2, cy, lane, g, false);
-      box(0.07, 0.07, Math.abs(cz - lane), cableMat, cx, cy, (cz + lane) / 2, g, false);
+      const cables = [
+        box(Math.abs(cx - dbX), 0.07, 0.07, cableMat, (cx + dbX) / 2, cy, lane, g, false),
+        box(0.07, 0.07, Math.abs(cz - lane), cableMat, cx, cy, (cz + lane) / 2, g, false),
+      ];
 
       const markerY = BASE + WALL_H + MARKER_LIFT;
       const marker = tripMarker(cx, markerY, cz, g);
@@ -447,7 +548,7 @@ export class SiteScene {
 
       for (const m of [floorMesh, ...walls]) { m.userData.circuitId = c.id; m.userData.floor = floor; this.pickRooms.push(m); }
       this.rooms.set(c.id, {
-        floorMat, wallMat, bandMat, cableMat, marker, markerY, label, labelObj: this.labelObjs.get(label)!, floor,
+        floorMat, wallMat, bandMat, cableMat, cables, marker, markerY, label, labelObj: this.labelObjs.get(label)!, floor,
         state: { band: 'ok', overloaded: false, tripped: false, dead: false },
       });
     });
@@ -485,13 +586,24 @@ export class SiteScene {
     roof.visible = false;
   }
 
-  private boardParts(board: Pick<Board, 'name' | 'parent' | 'floor'>, labelAt: THREE.Vector3, parent: THREE.Object3D | null, name = board.name): BoardParts {
+  private boardParts(
+    board: Pick<Board, 'name' | 'parent' | 'floor'> & { id?: string }, labelAt: THREE.Vector3, parent: THREE.Object3D | null,
+    name = board.name, cabinet: THREE.Mesh | null = null,
+  ): BoardParts {
     const host = parent ?? this.site;
     const label = this.addLabel(host, name, labelAt, 'scene-label tag');
     label.append(document.createElement('span'));
     const markerY = labelAt.y + 1.2;
+    // A board is small, so clicks land on a larger, unseen box around it
+    const hit = cabinet && board.id ? new THREE.Mesh(new THREE.BoxGeometry(1.8, 2.6, 1.8), new THREE.MeshBasicMaterial({ visible: false })) : null;
+    if (hit && cabinet) {
+      hit.position.copy(cabinet.position);
+      Object.assign(hit.userData, { boardId: board.id, floor: board.floor ?? 0 });
+      cabinet.parent!.add(hit);
+      this.pickBoards.push(hit);
+    }
     return {
-      cableMat: null, marker: tripMarker(labelAt.x, markerY, labelAt.z, host), markerY, label,
+      cableMat: null, feeder: [], cabinet, hit, labelAt: labelAt.clone(), marker: tripMarker(labelAt.x, markerY, labelAt.z, host), markerY, label,
       labelObj: this.labelObjs.get(label)!, floor: board.floor ?? 0, isTop: board.parent === null,
       state: { band: 'ok', overloaded: false, tripped: false, dead: false },
     };
@@ -529,7 +641,7 @@ export class SiteScene {
     duct.position.set(top.x, y, tile.maxZ + 0.06);
     this.site.add(run, riser, duct);
     const label = this.addLabel(this.site, 'Supply from the street', new THREE.Vector3(top.x, y - 0.9, tile.maxZ + 0.2), 'scene-label tag');
-    this.supply = { mat, labelObj: this.labelObjs.get(label)! };
+    this.supply = { mat, labelObj: this.labelObjs.get(label)!, meshes: [run, riser, duct] };
   }
 
   /** Stop the view from panning off the tile into empty sky. */
@@ -562,6 +674,7 @@ export class SiteScene {
       rm.wallMat.opacity += (target - rm.wallMat.opacity) * 0.15;
       rm.wallMat.depthWrite = rm.wallMat.opacity > 0.95;
     }
+    this.pulseTargets(t);
     if (!this.reduceMotion) {
       this.landscape?.tick(t);
       for (const p of [...this.rooms.values(), ...this.boards.values()]) {
@@ -574,6 +687,23 @@ export class SiteScene {
     this.labels.render(this.scene, this.camera);
   };
 
+  /** Build mode: what the part in hand can be used on glows on and off, or stays lit without motion. */
+  private pulseTargets(t: number): void {
+    const view = this.build;
+    if (!view?.targets) return;
+    const glow = this.reduceMotion ? 0.6 : 0.35 + 0.35 * (0.5 + 0.5 * Math.sin(t * 4));
+    if (view.targets === 'rooms') {
+      for (const [id, rm] of this.rooms) if (id !== view.selected && !view.rooms[id]?.wired) rm.floorMat.emissiveIntensity = glow;
+    } else {
+      for (const [id, bp] of this.boards) {
+        if (!bp.cabinet || id === view.selected) continue;
+        const m = bp.cabinet.material as THREE.MeshStandardMaterial;
+        m.emissive.set(TO_WIRE);
+        m.emissiveIntensity = glow;
+      }
+    }
+  }
+
   private onPointerDown = (e: PointerEvent): void => {
     this.down = { x: e.clientX, y: e.clientY };
   };
@@ -581,21 +711,24 @@ export class SiteScene {
   /** A click (not a drag) picks a room. A visible roof blocks the click. */
   private onPointerUp = (e: PointerEvent): void => {
     if (!this.down || Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) > 5) return;
-    const id = this.roomAt(e);
-    if (id) this.onRoomClick(id);
+    const hit = this.pickAt(e);
+    if (this.build) { if (hit) this.onPick(hit.kind, hit.id); else this.onMiss(); return; }
+    if (hit?.kind === 'room') this.onRoomClick(hit.id);
   };
 
-  /** Room under the pointer, ignoring hidden floors. A visible roof blocks the view. */
-  private roomAt(e: PointerEvent): string | null {
+  /** Room, or in build mode a board, under the pointer, ignoring hidden floors. A visible roof blocks the view. */
+  private pickAt(e: PointerEvent): { kind: 'room' | 'board'; id: string } | null {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
     const ray = new THREE.Raycaster();
     ray.setFromCamera(ndc, this.camera);
     const shown = (o: THREE.Object3D) => (o.userData.floor ?? 0) <= this.floorLimit;
     const roofs = this.pickRoof.filter(o => o.parent?.visible && o.parent.parent?.visible !== false);
-    const targets = [...roofs, ...this.pickRooms.filter(shown)];
-    const id = ray.intersectObjects(targets, false)[0]?.object.userData.circuitId;
-    return typeof id === 'string' ? id : null;
+    const boards = this.build ? this.pickBoards.filter(o => o.visible && shown(o)) : [];
+    const hit = ray.intersectObjects([...roofs, ...boards, ...this.pickRooms.filter(shown)], false)[0]?.object.userData;
+    if (typeof hit?.boardId === 'string') return { kind: 'board', id: hit.boardId };
+    if (typeof hit?.circuitId === 'string') return { kind: 'room', id: hit.circuitId };
+    return null;
   }
 
   /** Hover shows a room's label in smart mode. Checked once per frame at most. */
@@ -605,8 +738,9 @@ export class SiteScene {
       const ev = this.hoverQueued;
       this.hoverQueued = null;
       if (!ev) return;
-      const id = this.roomAt(ev);
-      this.renderer.domElement.style.cursor = id ? 'pointer' : '';
+      const hit = this.pickAt(ev);
+      this.renderer.domElement.style.cursor = hit ? 'pointer' : '';
+      const id = hit?.kind === 'room' ? hit.id : null;
       if (id !== this.hovered) { this.hovered = id; this.refreshLabels(); }
     });
     this.hoverQueued = e;

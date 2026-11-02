@@ -454,6 +454,41 @@ export function siteDesign(level: Level, b: SiteBuild): { design: Level; tip: nu
   };
 }
 
+/** A part in the player's hand while building a site in 3D. A cable stays in hand for room after room. */
+export type SiteTool = { kind: 'board' } | { kind: 'supply' } | { kind: 'cable'; mm2: number };
+
+/** What was clicked: a room (by circuit id) or a board. */
+export interface SiteTarget {
+  kind: 'room' | 'board';
+  id: string;
+}
+
+/** Use the part in hand on what was clicked. Returns the new build, or why nothing happened. */
+export function applySiteTool(level: Level, b: SiteBuild, tool: SiteTool, target: SiteTarget): { build: SiteBuild; tip: null } | { build: null; tip: string } {
+  const room = target.kind === 'room' ? level.circuits.find(c => c.id === target.id) : undefined;
+  const board = level.boards.find(x => x.id === (room ? room.board : target.id));
+  if (!board) return { build: null, tip: 'There is nothing to connect there.' };
+  const placeFirst = { build: null, tip: `Place the ${board.name} first. The rooms get their power through it.` };
+  const setBoard = (patch: Partial<SiteBuild['boards'][string]>) => ({ ...b, boards: { ...b.boards, [board.id]: { ...b.boards[board.id], ...patch } } });
+
+  if (tool.kind === 'board') {
+    if (b.boards[board.id].placed) return { build: null, tip: `The ${board.name} is already in place.` };
+    return { build: setBoard({ placed: true }), tip: null };
+  }
+  if (tool.kind === 'supply') {
+    const top = topBoard(level);
+    if (room || board.id !== top.id) return { build: null, tip: `The street cable goes to the ${top.name}. Click the ${top.name}.` };
+    if (!b.boards[top.id].placed) return placeFirst;
+    return { build: { ...b, supplyWired: true }, tip: null };
+  }
+  if (!b.boards[board.id].placed) return placeFirst;
+  if (room) return { build: { ...b, rooms: { ...b.rooms, [room.id]: { ...b.rooms[room.id], mm2: tool.mm2 } } }, tip: null };
+  const parent = level.boards.find(x => x.id === board.parent);
+  if (!parent) return { build: null, tip: `The ${board.name} is fed by the street cable, not a room cable.` };
+  if (!b.boards[parent.id].placed) return { build: null, tip: `Place the ${parent.name} first. ${board.name} gets its power through it.` };
+  return { build: setBoard({ mm2: tool.mm2 }), tip: null };
+}
+
 /** Coins for each star count. Only stars beyond the best so far pay out, so replays stay fair. */
 const COINS_AT_STARS: readonly number[] = [0, 20, 40, 60];
 export const coinsEarned = (bestStars: number, stars: number): number =>
