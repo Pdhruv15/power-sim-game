@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  applySiteTool, BOARD_BREAKER_SIZES, BREAKER_SIZES, DEFAULT_POINTS, designCost, peakNeeds, siteDesign, SOLAR_OPTIONS, SIZING_RULE,
+  applySiteTool, BOARD_BREAKER_SIZES, BREAKER_SIZES, DEFAULT_POINTS, designCost, peakNeeds, siteDesign, SOLAR_OPTIONS, SIZING_RULE, TRANSFORMER_SIZES,
   type SiteBuild, type SiteTool,
 } from '../game';
 import type { BuildView } from '../render/SiteScene';
-import { CABLE_SIZES, cableAmps, LOAD_LIBRARY, PHASES, startAmps, type Board, type Level, type Phase } from '../sim';
+import { CABLE_SIZES, cableAmps, LOAD_LIBRARY, PHASES, startAmps, TRANSFORMER_ID, transformerRatedAmps, type Board, type Level, type Phase } from '../sim';
 import { BuildStage, webglAvailable } from './BuildStage';
 import { fmt, hhmm } from './format';
 import { LoadLibrary } from './LoadLibrary';
@@ -78,8 +78,8 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
   const threePhase = level.boards.some(b => b.phases === 3);
   const solarScored = ((level.points ?? DEFAULT_POINTS).solar ?? 0) > 0;
   const nameOf = (b: Board) => (level.boards.length === 1 ? 'Board' : b.name);
-  // Villas are built in the 3D world. Buildings and villages, and devices without 3D, use the diagram.
-  const can3d = !level.boards.some(b => (b.floor ?? 0) > 0 || b.row !== undefined);
+  // Villas and villages are built in the 3D world. Buildings, and devices without 3D, use the diagram.
+  const can3d = !level.boards.some(b => (b.floor ?? 0) > 0);
   const [view, setView] = useState<'3d' | 'diagram'>('3d');
   const [no3d, setNo3d] = useState(() => !webglAvailable());
   const in3d = can3d && !no3d && view === '3d';
@@ -88,7 +88,10 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
   const [focus, setFocus] = useState<string | null>(null);
   const houses = level.boards.filter(b => level.circuits.some(c => c.board === b.id));
   const roomCables = below.length ? CABLE_SIZES : ROOM_CABLES;
-  const phased = level.boards.some(b => b.phases === 3 && level.circuits.some(c => c.board === b.id));
+  /** A single-phase board fed from a three-phase one sits on one phase as a whole. */
+  const onOnePhase = (b: Board) => b.phases === 1 && level.boards.find(x => x.id === b.parent)?.phases === 3;
+  const phased = level.boards.some(b => onOnePhase(b) || (b.phases === 3 && level.circuits.some(c => c.board === b.id)));
+  const boardPhase = (b: Board): Phase => build.boards[b.id].phase ?? b.phase;
 
   useEffect(() => {
     if (!tool) return;
@@ -181,6 +184,12 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
   };
   /** 3D: a click on a room or a board uses the part in hand, or picks it to change its sizes. */
   const pick = (kind: 'room' | 'board', id: string) => {
+    if (id === TRANSFORMER_ID) {
+      if (tool) { setTip('The transformer comes with the site. Click it with nothing in hand to pick its size.'); return; }
+      setTip(null);
+      setSelected('transformer');
+      return;
+    }
     if (!tool) {
       setTip(null);
       setSelected(kind === 'room' ? roomIn(id) : `board.${id}`);
@@ -250,7 +259,8 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
   const selectedRoom = level.circuits.find(c => selected === roomIn(c.id));
 
   /** Rooms on a phase, across the three-phase boards. */
-  const onPhase = (p: Phase) => level.circuits.filter(c => build.rooms[c.id].phase === p && level.boards.find(b => b.id === c.board)?.phases === 3).length;
+  const onPhase = (p: Phase) => level.circuits.filter(c => build.rooms[c.id].phase === p && level.boards.find(b => b.id === c.board)?.phases === 3).length
+    + level.boards.filter(b => onOnePhase(b) && boardPhase(b) === p).length;
   /** The board in hand, if any. */
   const held = tool?.kind === 'board' ? level.boards.find(b => b.id === tool.board) ?? top : null;
 
@@ -258,7 +268,7 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
     boards: Object.fromEntries(level.boards.map(b => {
       const s = build.boards[b.id];
       const split = b.phases === 3 && s.placed ? PHASES.map((p, i) => `${p} ${fmt(needs.boards.get(b.id)?.phaseAmps?.[i] ?? 0, 0)}`).join(' · ') + ' A' : null;
-      return [b.id, { placed: s.placed, fed: s.mm2 != null, name: nameOf(b), text: split ?? (s.placed ? `${s.breakerA} A` : 'not placed') }];
+      return [b.id, { placed: s.placed, fed: s.mm2 != null, name: nameOf(b), text: split ?? (s.placed ? `${s.breakerA} A` : 'not placed'), phase: onOnePhase(b) ? boardPhase(b) : null }];
     })),
     supplyWired: build.supplyWired,
     rooms: Object.fromEntries(level.circuits.map(c => {
@@ -279,9 +289,9 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
     ? 'Pick a part below, then click in the house. Click a room to change its sizes.'
     : tool.kind === 'board' ? (held && houses.includes(held)
       ? `Click a room in ${level.boards.length === 1 ? 'the house' : held.name} to fix its board at the end of the corridor.`
-      : `Click the faint ${(held ?? top).name.toLowerCase()} by the street to place it.`)
+      : `Click the faint ${(held ?? top).name.toLowerCase()} to place it.`)
       : tool.kind === 'supply' ? `Click the ${nameOf(top).toLowerCase()} to bring the street cable to it.`
-        : tool.kind === 'phase' ? `Click each room to move it onto ${tool.phase}. Keep L1, L2 and L3 about equal on every board.`
+        : tool.kind === 'phase' ? `Click each room${level.boards.some(onOnePhase) ? ', or a single-phase board,' : ''} to move it onto ${tool.phase}. Keep L1, L2 and L3 about equal on every board.`
           : `Click each room to run a ${tool.mm2} mm² cable to it (good for ${cableAmps(tool.mm2)} A)${below.length ? ', or a board to run its feeder' : ''}. Pick the cable again, or press Esc, to put it down.`;
 
   return (
@@ -301,11 +311,19 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
                 level={level} view={buildView} focus={focus} onPick={pick} onFail={() => { setNo3d(true); setTool(null); }}
                 onMiss={() => {
                   if (!tool) setSelected(null);
-                  else setTip(below.length ? 'Click a room, a board, or the feeder pillar by the street.' : `Click inside the house: a room, or the ${nameOf(top).toLowerCase()} at the end of the corridor.`);
+                  else setTip(below.length ? 'Click a room or a board.' : `Click inside the house: a room, or the ${nameOf(top).toLowerCase()} at the end of the corridor.`);
                 }}
               />
               <p className="build-count"><b>{wired} of {level.circuits.length}</b> rooms wired</p>
-              {houses.length > 1 && (
+              {houses.length > 3 && (
+                <label className="focus-pick focus-select">Look at
+                  <select id="focus-pick" value={focus ?? ''} onChange={e => setFocus(e.target.value || null)}>
+                    <option value="">The whole site</option>
+                    {houses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </label>
+              )}
+              {houses.length > 1 && houses.length <= 3 && (
                 <div className="seg focus-pick" role="group" aria-label="Look at">
                   <button type="button" id="focus-site" aria-pressed={focus === null} onClick={() => setFocus(null)}>Whole site</button>
                   {houses.map(b => <button key={b.id} type="button" id={`focus-${b.id}`} aria-pressed={focus === b.id} onClick={() => setFocus(b.id)}>{b.name}</button>)}
@@ -314,12 +332,13 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
             </div>
 
             <div className="hotbar" role="toolbar" aria-label="Parts">
-              {level.boards.map(b => (
+              {/* A board's slot goes once it is placed, so the bar keeps to what is left to do */}
+              {level.boards.filter(b => !build.boards[b.id].placed).map(b => (
                 <button
                   key={b.id} type="button" id={`tool-board-${b.id}`} className="hot-slot" aria-pressed={held?.id === b.id}
-                  disabled={build.boards[b.id].placed} onClick={() => takeTool({ kind: 'board', board: b.id })}
+                  onClick={() => takeTool({ kind: 'board', board: b.id })}
                 >
-                  <PartIcon name="board" size={22} /><b>{nameOf(b)}</b><small>{build.boards[b.id].placed ? 'placed' : '1 left'}</small>
+                  <PartIcon name="board" size={22} /><b>{nameOf(b)}</b><small>to place</small>
                 </button>
               ))}
               <button
@@ -347,6 +366,13 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
             </div>
 
             <div className="pick-strip" role="group" aria-label="Rooms">
+              {level.transformer && (
+                <span className="pick-group">
+                  <button type="button" id="pick-transformer" className={`pick-chip board on${selected === 'transformer' ? ' sel' : ''}`} onClick={() => pick('board', TRANSFORMER_ID)}>
+                    <PartIcon name="transformer" size={16} />{level.transformer.name} <small>{build.transformerKva} kVA</small>
+                  </button>
+                </span>
+              )}
               {level.boards.map(b => (
                 <span key={b.id} className="pick-group">
                   <button
@@ -355,6 +381,7 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
                     onClick={() => pick('board', b.id)}
                   >
                     <PartIcon name="board" size={16} />{nameOf(b)}
+                    {onOnePhase(b) && <i className={`ph-tag ph-${boardPhase(b)}`}>{boardPhase(b)}</i>}
                   </button>
                   {level.circuits.filter(c => c.board === b.id).map(c => (
                     <button
@@ -400,6 +427,22 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
                 </section>
               );
             })()}
+            {selected === 'transformer' && level.transformer && build.transformerKva !== null && (
+              <section className="panel pick-card" aria-label={level.transformer.name}>
+                <header>
+                  <h2><PartIcon name="transformer" size={20} /> {level.transformer.name}</h2>
+                  <small>busiest phase: {fmt(((needs.boards.get(top.id)?.amps ?? 0) / transformerRatedAmps(build.transformerKva, level.voltage)) * 100, 0)} % of this size</small>
+                </header>
+                <div className="pick-fields">
+                  <label>Size
+                    <select id="tx-kva" value={build.transformerKva} onChange={e => update({ transformerKva: Number(e.target.value) })}>
+                      {TRANSFORMER_SIZES.map(k => <option key={k} value={k}>{k} kVA</option>)}
+                    </select>
+                  </label>
+                  <small>Size it for the busiest moment, not every room at once.</small>
+                </div>
+              </section>
+            )}
             {selectedBoard && (
               <section className="panel pick-card" aria-label={selectedBoard.name}>
                 <header>
@@ -413,6 +456,13 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
                         {BOARD_BREAKER_SIZES.map(a => <option key={a} value={a}>{a} A</option>)}
                       </select>
                     </label>
+                    {onOnePhase(selectedBoard) && (
+                      <label>Phase
+                        <select id={`ph-${selectedBoard.id}`} value={boardPhase(selectedBoard)} onChange={e => setBoard(selectedBoard.id, { phase: e.target.value as Phase })}>
+                          {PHASES.map(p => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                      </label>
+                    )}
                     {selectedBoard.parent ? (
                       <label>Feeder cable, {selectedBoard.cable?.lengthM} m
                         <select

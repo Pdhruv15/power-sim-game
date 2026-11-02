@@ -352,8 +352,8 @@ describe('Level 1 flow', () => {  it('runs the day, shows the mistakes, and give
       ...STARTER_DONE, 'level-1-villa': { score: 905, stars: 3 }, 'level-2-two-villas': { score: 800, stars: 2 }, 'level-services': { score: 800, stars: 2 }, 'level-3-building': { score: 800, stars: 2 },
     }));
     render(<App />);
-    await screen.findByRole('button', { name: 'Run the day' });
-    fireEvent.click(screen.getByRole('button', { name: /Level 7/ }));
+    expect(await screen.findByText('0 of 18 rooms wired')).toBeTruthy(); // the village opens on its empty plan
+    await openInstallerWiring();
     expect(await screen.findByText(/Every room at once: 85 kVA · busiest moment: 69 kVA at 12:00/)).toBeTruthy();
     expect(screen.getByText(/Busiest phase: 416 % of this size/)).toBeTruthy();
 
@@ -421,6 +421,19 @@ describe('Level 1 flow', () => {  it('runs the day, shows the mistakes, and give
     expect(screen.getByText('Villages').closest('li')!.className).toBe('lit');
     click('next-level');
     expect(await screen.findByText(/Level 9 · Small city · Power mix/)).toBeTruthy();
+  });
+
+  it('opens a level from its block on the world map, and keeps later steps locked', async () => {
+    localStorage.setItem('power-sim:progress:v1', JSON.stringify({ ...STARTER_DONE, 'level-1-villa': { score: 905, stars: 3 } }));
+    render(<App />);
+    await screen.findByText('0 of 12 rooms wired');
+    const villa = document.getElementById('map-villa')!;
+    expect(villa.getAttribute('aria-label')).toBe('Villa, level 3, 3 of 3 stars');
+    expect(villa.closest('li')!.className).toBe('lit');
+    expect(document.getElementById('map-street')!.getAttribute('aria-current')).toBe('step');
+    expect((document.getElementById('map-big-city') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(villa);
+    expect(await screen.findByText(/Level 3 · One villa/)).toBeTruthy();
   });
 
   it('shows level file problems instead of a blank screen', async () => {

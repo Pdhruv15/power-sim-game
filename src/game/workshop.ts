@@ -1,5 +1,5 @@
 import { BANDS, cableAmps, INSTANT_TRIP, joinedPoints, NEW_BREAKER, solveCircuit, stepBreaker, topBoard, type Level, type Phase, type Resistor } from '../sim';
-import { breakerPrice, cablePrice } from './catalog';
+import { breakerPrice, cablePrice, TRANSFORMER_SIZES } from './catalog';
 import { fmt } from './format';
 
 /**
@@ -410,8 +410,13 @@ export interface SiteBuild {
   /** The street supply is wired to the top board. */
   supplyWired: boolean;
   solarKw: number;
-  /** Per board: placed yet, its breaker, and its feeder cable once it is wired. */
-  boards: Record<string, { placed: boolean; breakerA: number; mm2: number | null }>;
+  /** Size of the site's transformer, in kVA, on sites that have one. */
+  transformerKva: number | null;
+  /**
+   * Per board: placed yet, its breaker, its feeder cable once it is wired, and for a single-phase board
+   * fed from a three-phase one, the phase it is on.
+   */
+  boards: Record<string, { placed: boolean; breakerA: number; mm2: number | null; phase?: Phase }>;
   /** Per room: its breaker, its phase, and the size of its cable once it is wired. */
   rooms: Record<string, { breakerA: number; phase: Phase; mm2: number | null }>;
 }
@@ -419,7 +424,7 @@ export interface SiteBuild {
 /** An empty site: nothing wired, and the smallest breakers, as they come out of the box. */
 export function newSiteBuild(level: Level, boardBreakerA: number, roomBreakerA: number): SiteBuild {
   return {
-    supplyWired: false, solarKw: 0,
+    supplyWired: false, solarKw: 0, transformerKva: level.transformer ? TRANSFORMER_SIZES[0] : null,
     boards: Object.fromEntries(level.boards.map(b => [b.id, { placed: false, breakerA: boardBreakerA, mm2: null }])),
     rooms: Object.fromEntries(level.circuits.map(c => [c.id, { breakerA: roomBreakerA, phase: 'L1' as Phase, mm2: null }])),
   };
@@ -444,10 +449,12 @@ export function siteDesign(level: Level, b: SiteBuild): { design: Level; tip: nu
     tip: null,
     design: {
       ...level,
+      ...(level.transformer && { transformer: { ...level.transformer, kva: b.transformerKva ?? level.transformer.kva } }),
       boards: level.boards.map(x => ({
         ...x, breakerA: b.boards[x.id].breakerA,
         ...(x.id === top.id && { solarKw: b.solarKw }),
         ...(x.cable && { cable: { ...x.cable, mm2: b.boards[x.id].mm2! } }),
+        ...(b.boards[x.id].phase && { phase: b.boards[x.id].phase }),
       })),
       circuits: level.circuits.map(c => ({ ...c, breakerA: b.rooms[c.id].breakerA, cableMm2: b.rooms[c.id].mm2!, phase: b.rooms[c.id].phase })),
     },
@@ -484,6 +491,12 @@ export function applySiteTool(level: Level, b: SiteBuild, tool: SiteTool, target
     return { build: setBoard({ placed: true }), tip: null };
   }
   if (tool.kind === 'phase') {
+    const feed = level.boards.find(x => x.id === board.parent);
+    // A single-phase board fed from a three-phase one is on one phase as a whole
+    if (board.phases === 1 && feed?.phases === 3) {
+      if (room) return { build: null, tip: `${board.name} is single-phase, so all its rooms share one phase. Click the ${board.name} board to pick it.` };
+      return { build: setBoard({ phase: tool.phase }), tip: null };
+    }
     if (!room) return { build: null, tip: 'Phases are picked room by room: click a room.' };
     if (board.phases !== 3) return { build: null, tip: `${board.name} is single-phase, so every room on it is on L1.` };
     return { build: { ...b, rooms: { ...b.rooms, [room.id]: { ...b.rooms[room.id], phase: tool.phase } } }, tip: null };

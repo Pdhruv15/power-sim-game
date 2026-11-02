@@ -47,7 +47,7 @@ describe('Level 1: single circuit', () => {
     expect(within(document.querySelector<HTMLElement>('.panel.score')!).getByLabelText('3 of 3 stars')).toBeTruthy();
     expect(screen.getByText('+60 coins')).toBeTruthy();
     expect(coins()).toBe('80 coins');
-    expect(document.querySelector('.world-map li.lit')!.textContent).toBe('Circuit');
+    expect(document.querySelector('.world-map li.lit .map-name')!.textContent).toBe('Circuit');
 
     click('next-level');
     expect(await screen.findByText(/One room · Workshop/)).toBeTruthy();

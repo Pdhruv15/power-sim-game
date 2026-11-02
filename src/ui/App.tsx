@@ -8,7 +8,7 @@ import { CircuitList } from './CircuitList';
 import { DesignPanel } from './DesignPanel';
 import { EventLog } from './EventLog';
 import { Kpis } from './Kpis';
-import { LEVELS, WORLD_MAP, type LevelEntry } from './levels';
+import { LEVELS, type LevelEntry } from './levels';
 import { LoadChart } from './LoadChart';
 import { MixLevel } from './MixLevel';
 import { isUnlocked, loadProgress, loadWallet, saveResult, saveWallet, type Best } from './progress';
@@ -19,6 +19,7 @@ import { SiteBuilder } from './SiteBuilder';
 import { useAnimationClock } from './useAnimationClock';
 import { ViewBar } from './ViewBar';
 import { WorkshopLevel } from './WorkshopLevel';
+import { WorldMap } from './WorldMap';
 
 const START_HOUR = 12;
 /** Simulated hours per real second: free exploring, and the scored day replay (24 h in 12 s). */
@@ -69,16 +70,10 @@ export function App() {
     </nav>
   );
 
+  const map = <WorldMap progress={progress} current={entry.id} onOpen={setEntry} />;
+
   if (!entry.file) {
     const next = LEVELS[LEVELS.indexOf(entry) + 1];
-    const map = (
-      <ol className="world-map" aria-label="Your world">
-        {WORLD_MAP.map(step => {
-          const stars = step.level ? progress[step.level]?.stars ?? 0 : 0;
-          return <li key={step.name} className={stars > 0 ? 'lit' : undefined}><i />{step.name}</li>;
-        })}
-      </ol>
-    );
     const props = {
       entry, picker, map, best: progress[entry.id],
       onResult: (stars: number) => setProgress(saveResult(entry.id, { score: stars, stars })),
@@ -90,7 +85,7 @@ export function App() {
   if (!loaded || loaded.id !== entry.id) return <main className="app">{picker}<p className="muted">Loading level…</p></main>;
   return (
     <PlayLevel
-      key={entry.id} entry={entry} level={loaded.level} picker={picker}
+      key={entry.id} entry={entry} level={loaded.level} picker={picker} map={map}
       onResult={card => {
         const coins = coinsEarned(progress[entry.id]?.stars ?? 0, card.stars);
         if (coins > 0) {
@@ -119,11 +114,12 @@ interface PlayProps {
   entry: LevelEntry;
   level: Level;
   picker: React.ReactNode;
+  map: React.ReactNode;
   /** Saves the result and returns the coins it earned. */
   onResult: (card: ScoreCard) => number;
 }
 
-function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
+function PlayLevel({ entry, level, picker, map, onResult }: PlayProps) {
   const [design, setDesign] = useState(level);
   // Levels with a builder start from an empty plan. The installer's wiring stays available to fix instead.
   const [building, setBuilding] = useState(!!entry.buildGoal);
@@ -225,6 +221,7 @@ function PlayLevel({ entry, level, picker, onResult }: PlayProps) {
         </p>
       </header>
       {picker}
+      {map}
       {entry.buildGoal && phase.kind === 'design' && (
         <div className="seg build-mode" role="group" aria-label="How to work on this level">
           <button type="button" aria-pressed={building} onClick={() => setBuilding(true)}>Build it yourself</button>
