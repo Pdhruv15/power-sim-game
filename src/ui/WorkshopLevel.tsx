@@ -21,7 +21,7 @@ const DB_BOX = { left: 180, top: 20, width: 380, height: 400 };
 const LOADS_MIN_X = DB_BOX.left + DB_BOX.width + 2 * GRID;
 const STEP_MS = 1500;
 const PART_ICONS: Readonly<Record<PartKind, IconName>> = {
-  battery: 'battery', supply: 'supply', switch: 'switch', breaker: 'breaker', lamp: 'bulb', light: 'bulb', socket: 'socket', lbar: 'bar', nbar: 'bar', ebar: 'bar', mainswitch: 'breaker',
+  battery: 'battery', supply: 'supply', switch: 'switch', breaker: 'breaker', lamp: 'lamp', light: 'lamp', socket: 'socket', lbar: 'busbar', nbar: 'busbar', ebar: 'busbar', mainswitch: 'isolator',
 };
 /** Where each part goes when added with a click: laid out in the order the power flows. */
 const LAYOUTS: Readonly<Record<string, Partial<Record<PartKind, readonly (readonly [number, number])[]>>>> = {
@@ -249,7 +249,7 @@ export function WorkshopLevel({ entry, picker, map, best, onResult, onNext }: Pr
                     onPointerDown={e => startDragFromTray(e, kind)}
                     onClick={() => { if (!dragged.current) addPart(kind); dragged.current = false; }}
                   >
-                    <PartIcon name={PART_ICONS[kind]} size={18} /> <b>{PART_INFO[kind].name}</b> <small>{left} left</small>
+                    <PartIcon name={PART_ICONS[kind]} size={20} /> <b>{PART_INFO[kind].name}</b> <small>{left} left</small>
                   </button>
                 );
               })}
@@ -303,8 +303,10 @@ export function WorkshopLevel({ entry, picker, map, best, onResult, onNext }: Pr
                     style={{ left: p.x, top: p.y, width: size.w, height: size.h }}
                     onPointerDown={e => startMovePart(e, p)} onKeyDown={e => onPartKey(e, p)}
                   >
-                    {!isBar(p.kind) && p.kind !== 'breaker' && p.kind !== 'mainswitch' && <PartIcon name={PART_ICONS[p.kind]} />}
-                    <span className="part-name">{p.label ?? PART_INFO[p.kind].name}</span>
+                    {!isBar(p.kind) && p.kind !== 'breaker' && <PartIcon name={PART_ICONS[p.kind]} size={p.kind === 'mainswitch' ? 22 : 28} />}
+                    {p.kind === 'breaker'
+                      ? <span className="part-title"><PartIcon name="breaker" size={16} /><span className="part-name">{p.label ?? PART_INFO[p.kind].name}</span></span>
+                      : <span className="part-name">{p.label ?? PART_INFO[p.kind].name}</span>}
                     {p.kind === 'breaker' && !open && (
                       <select
                         id={`size-${p.id}`} aria-label="Breaker size" value={p.breakerA} disabled={locked}

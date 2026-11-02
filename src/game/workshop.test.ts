@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { parseLevel, type Level, type Phase } from '../sim';
 import { runDay } from './runDay';
 import { scoreDay } from './score';
-import { buildCost, coinsEarned, MISSIONS, newSiteBuild, powerOn, siteDesign, wireConductor, type Build, type PartKind, type PlacedPart, type SiteBuild } from './workshop';
+import {
+  applySiteTool, buildCost, coinsEarned, MISSIONS, newSiteBuild, powerOn, siteDesign, wireConductor, type Build, type PartKind, type PlacedPart, type SiteBuild,
+  type SiteTarget, type SiteTool,
+} from './workshop';
 
 const part = (id: string, kind: PartKind, breakerA?: number): PlacedPart => ({ id, kind, x: 0, y: 0, ...(breakerA && { breakerA }) });
 /** Wires as "from to" or "from to mm2". */
@@ -287,5 +290,52 @@ describe('coinsEarned', () => {
     expect(coinsEarned(1, 3)).toBe(40);
     expect(coinsEarned(3, 3)).toBe(0);
     expect(coinsEarned(3, 1)).toBe(0);
+  });
+});
+
+describe('building a site with parts in hand', () => {
+  const villa = (): Level => parseLevel(JSON.parse(readFileSync(new URL('../../public/data/villa.json', import.meta.url), 'utf8')));
+  const street = (): Level => parseLevel(JSON.parse(readFileSync(new URL('../../public/data/two-villas.json', import.meta.url), 'utf8')));
+  /** Use each part in hand on its target, in turn. */
+  const use = (l: Level, b: SiteBuild, ...steps: [SiteTool, SiteTarget][]) => steps.reduce((cur, [tool, target]) => {
+    const r = applySiteTool(l, cur, tool, target);
+    if (!r.build) throw new Error(r.tip);
+    return r.build;
+  }, b);
+
+  it('places the board, brings the street cable to it, then runs a cable to each room clicked', () => {
+    const l = villa();
+    const b = use(l, newSiteBuild(l, 63, 16),
+      [{ kind: 'board' }, { kind: 'room', id: 'C1' }],
+      [{ kind: 'supply' }, { kind: 'board', id: 'DB' }],
+      [{ kind: 'cable', mm2: 2.5 }, { kind: 'room', id: 'C4' }],
+      [{ kind: 'cable', mm2: 1.5 }, { kind: 'room', id: 'C1' }]);
+    expect(b.boards.DB.placed).toBe(true);
+    expect(b.supplyWired).toBe(true);
+    expect(b.rooms.C4.mm2).toBe(2.5);
+    expect(b.rooms.C1.mm2).toBe(1.5);
+    expect(b.rooms.C2.mm2).toBeNull();
+  });
+
+  it('says why a part cannot go where it was clicked', () => {
+    const l = villa();
+    const empty = newSiteBuild(l, 63, 16);
+    expect(applySiteTool(l, empty, { kind: 'cable', mm2: 2.5 }, { kind: 'room', id: 'C1' }).tip).toBe('Place the Villa DB first. The rooms get their power through it.');
+    expect(applySiteTool(l, empty, { kind: 'supply' }, { kind: 'board', id: 'DB' }).tip).toMatch(/^Place the Villa DB first/);
+    expect(applySiteTool(l, empty, { kind: 'supply' }, { kind: 'room', id: 'C1' }).tip).toBe('The street cable goes to the Villa DB. Click the Villa DB.');
+    const placed = use(l, empty, [{ kind: 'board' }, { kind: 'room', id: 'C3' }]);
+    expect(applySiteTool(l, placed, { kind: 'board' }, { kind: 'room', id: 'C1' }).tip).toBe('The Villa DB is already in place.');
+    expect(applySiteTool(l, placed, { kind: 'cable', mm2: 2.5 }, { kind: 'board', id: 'DB' }).tip).toMatch(/fed by the street cable/);
+    expect(applySiteTool(l, empty, { kind: 'board' }, { kind: 'room', id: 'nowhere' }).tip).toBe('There is nothing to connect there.');
+  });
+
+  it('runs a feeder to a board below once the board above is placed', () => {
+    const l = street();
+    const b = newSiteBuild(l, 63, 16);
+    expect(applySiteTool(l, b, { kind: 'cable', mm2: 10 }, { kind: 'board', id: 'VA' }).tip).toMatch(/^Place the Villa A first/);
+    const placed = use(l, b, [{ kind: 'board' }, { kind: 'board', id: 'VA' }]);
+    expect(applySiteTool(l, placed, { kind: 'cable', mm2: 10 }, { kind: 'board', id: 'VA' }).tip).toBe('Place the Feeder pillar first. Villa A gets its power through it.');
+    const fed = use(l, placed, [{ kind: 'board' }, { kind: 'board', id: 'FP' }], [{ kind: 'cable', mm2: 10 }, { kind: 'board', id: 'VA' }]);
+    expect(fed.boards.VA.mm2).toBe(10);
   });
 });

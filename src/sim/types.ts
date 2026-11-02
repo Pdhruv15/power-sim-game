@@ -1,7 +1,7 @@
 /** Load types. Each has its own daily demand profile. */
-export type LoadType = 'lighting' | 'sockets' | 'ac' | 'shop' | 'school';
+export type LoadType = 'lighting' | 'sockets' | 'ac' | 'shop' | 'school' | 'heater' | 'pump' | 'lift' | 'computers' | 'ev' | 'streetlight' | 'hospital';
 
-export const LOAD_TYPES: readonly LoadType[] = ['lighting', 'sockets', 'ac', 'shop', 'school'];
+export const LOAD_TYPES: readonly LoadType[] = ['lighting', 'sockets', 'ac', 'heater', 'pump', 'lift', 'computers', 'shop', 'school', 'ev', 'streetlight', 'hospital'];
 
 /** Supply phases. A single-phase board uses L1 only. */
 export type Phase = 'L1' | 'L2' | 'L3';

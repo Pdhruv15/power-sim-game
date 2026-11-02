@@ -349,3 +349,57 @@ describe('Level 4: village', () => {
     expect(total.hour).toBe(12);
   });
 });
+
+describe('Service block: loads with a start-up surge', () => {
+  const services = (): Level => parseLevel(JSON.parse(readFileSync(new URL('../../public/data/services.json', import.meta.url), 'utf8')));
+  /** Breaker, cable and phase per circuit: motors sized for their start, and the load spread over the phases. */
+  const SAFE: Record<string, [number, number, 'L1' | 'L2' | 'L3']> = {
+    S1: [20, 2.5, 'L2'], S2: [32, 6, 'L1'], S3: [16, 1.5, 'L3'], S4: [16, 2.5, 'L3'],
+    S5: [40, 6, 'L2'], S6: [16, 2.5, 'L1'], S7: [20, 2.5, 'L2'], S8: [6, 1.5, 'L3'],
+  };
+  const safe = (patch: Record<string, number> = {}): Level => {
+    const l = services();
+    for (const c of l.circuits) {
+      c.breakerA = patch[c.id] ?? SAFE[c.id][0];
+      c.cableMm2 = SAFE[c.id][1];
+      c.phase = SAFE[c.id][2];
+    }
+    return l;
+  };
+  const score = (l: Level) => scoreDay(l, runDay(l));
+
+  it('can earn full marks once every motor can start', () => {
+    const r = score(safe());
+    expect(r.lessons.filter(x => x.kind === 'mistake')).toEqual([]);
+    expect(r.stars).toBe(3);
+    expect(r.lessons.some(x => x.title === 'Motors started cleanly')).toBe(true);
+  });
+
+  it('trips the pump on a breaker that suits its running current, and says what to pick', () => {
+    const l = safe({ S1: 16 });
+    const day = runDay(l);
+    expect(day.tripHour.get('S1')).toBe(6);
+    expect(day.starts.find(s => s.circuit === 'S1')!.tripped).toEqual(['S1']);
+    const lesson = scoreDay(l, day).lessons.find(x => x.target === 'S1' && x.kind === 'mistake')!;
+    expect(lesson.title).toBe('Breaker opened as the motor started: Water pump');
+    expect(lesson.text).toMatch(/runs at 15.3 A but starts at 92 A/);
+    expect(lesson.text).toMatch(/Pick at least 20 A/);
+  });
+
+  it('marks the surge on the day, without calling it an overload', () => {
+    const day = runDay(safe({ S2: 25 }));
+    expect(day.events.some(e => e.target === 'S2' && /started at 141 A/.test(e.text))).toBe(true);
+  });
+
+  it('blames a board breaker the surge opens', () => {
+    const l = safe();
+    l.circuits = l.circuits.filter(c => c.id === 'S1');
+    l.boards[0].breakerA = 9; // opens at once from 90 A, and the pump starts at 92 A
+    const r = score(l);
+    expect(r.lessons.some(x => x.title === 'Board breaker opened by a motor starting: Services board')).toBe(true);
+  });
+
+  it('leaves levels with no surging loads alone', () => {
+    expect(runDay(parseLevel(JSON.parse(readFileSync(new URL('../../public/data/villa.json', import.meta.url), 'utf8')))).starts).toEqual([]);
+  });
+});

@@ -7,7 +7,7 @@ import { App } from './App';
 
 // jsdom gives import.meta.url an http scheme, so read the level from the project root
 const file = (name: string) => readFileSync(resolve(process.cwd(), 'public/data', name), 'utf8');
-const LEVEL_FILES: Record<string, string> = Object.fromEntries(['villa.json', 'two-villas.json', 'building.json', 'village.json'].map(n => [n, file(n)]));
+const LEVEL_FILES: Record<string, string> = Object.fromEntries(['villa.json', 'two-villas.json', 'services.json', 'building.json', 'village.json'].map(n => [n, file(n)]));
 
 const STARTER_DONE = { 'level-circuit': { score: 3, stars: 3 }, 'level-room': { score: 3, stars: 3 } };
 
@@ -114,6 +114,8 @@ describe('Building two villas', () => {
   const wire = (from: string, to: string) => { click(from); click(to); };
   const SPREAD: Record<string, string> = { 1: 'L1', 5: 'L1', 2: 'L2', 6: 'L2', 3: 'L3', 4: 'L3' };
   const ROOM: Record<string, [string, string]> = { 1: ['25', '4'], 2: ['20', '2.5'], 3: ['16', '2.5'], 4: ['20', '2.5'], 5: ['10', '1.5'], 6: ['16', '2.5'] };
+  const sheet = (id: string) => click(`open-${id}`);
+  const up = () => click('sheet-up');
   const open = async () => {
     localStorage.setItem('power-sim:progress:v1', JSON.stringify({ ...STARTER_DONE, 'level-1-villa': { score: 955, stars: 3 } }));
     render(<App />);
@@ -126,6 +128,7 @@ describe('Building two villas', () => {
     click('tray-VA');
     click('tray-VB');
     expect(document.getElementById('part-VA')!.textContent).toMatch(/L1 62 · L2 0 · L3 0/);
+    sheet('VA');
     pick('ph-A2', 'L2');
     expect(document.getElementById('part-VA')!.textContent).toMatch(/L2 1[0-9]/);
     expect(screen.getByText('Villa B feeder · 85 m')).toBeTruthy();
@@ -138,9 +141,34 @@ describe('Building two villas', () => {
     click('tray-VA');
     wire('term-street', 'term-VA-in');
     expect(screen.getByRole('status').textContent).toMatch(/does nothing here/);
-    wire('term-FP-out', 'term-A1');
+    wire('term-VA-out', 'term-FP-in');
     expect(screen.getByRole('status').textContent).toMatch(/does nothing here/);
+    sheet('VA');
     wire('term-VA-out', 'term-A1');
+    expect(screen.getByText('1 of 12 rooms wired')).toBeTruthy();
+  });
+
+  it('keeps the plan to boards, and opens each one on a sheet of its own rooms', async () => {
+    await open();
+    ['FP', 'VA', 'VB'].forEach(id => click(`tray-${id}`));
+    expect(document.querySelector('.room-part')).toBeNull();
+    expect(document.getElementById('term-street')).toBeTruthy();
+    expect(document.getElementById('part-VA')!.textContent).toMatch(/0 of 6 wired/);
+
+    sheet('VA');
+    expect(document.querySelectorAll('.room-part')).toHaveLength(6);
+    expect(document.getElementById('room-A1')).toBeTruthy();
+    expect(document.getElementById('room-B1')).toBeNull();
+    expect(document.getElementById('term-street')).toBeNull();
+    expect(document.getElementById('part-VB')).toBeNull();
+    expect(screen.getByRole('navigation', { name: 'Sheets' }).textContent).toMatch(/Two villas.*Villa A/);
+
+    wire('term-VA-out', 'term-A1');
+    expect(document.querySelectorAll('.wire')).toHaveLength(1);
+    up();
+    expect(document.querySelector('.room-part')).toBeNull();
+    expect(document.getElementById('part-VA')!.textContent).toMatch(/1 of 6 wired/);
+    expect(document.querySelectorAll('.wire')).toHaveLength(0); // room wires stay on their sheet
     expect(screen.getByText('1 of 12 rooms wired')).toBeTruthy();
   });
 
@@ -156,12 +184,14 @@ describe('Building two villas', () => {
     pick('brk-VB', '40');
     wire('term-FP-out', 'term-VB-in');
     for (const v of ['A', 'B']) {
+      sheet(`V${v}`);
       for (const n of ['1', '2', '3', '4', '5', '6']) {
         pick(`brk-${v}${n}`, ROOM[n][0]);
         pick(`ph-${v}${n}`, SPREAD[n]);
         click(`cable-${ROOM[n][1]}`);
         wire(`term-V${v}-out`, `term-${v}${n}`);
       }
+      up();
     }
     click('power-on');
     fireEvent.click(screen.getByRole('button', { name: 'Skip to result' }));
@@ -177,13 +207,57 @@ describe('Building two villas', () => {
     click('tray-VA');
     wire('term-street', 'term-FP-in');
     wire('term-FP-out', 'term-VA-in');
+    sheet('VA');
     wire('term-VA-out', 'term-A1');
+    up();
     fireEvent.pointerDown(document.getElementById('part-VA')!, { clientX: 300, clientY: 100 });
     fireEvent.pointerUp(window);
     fireEvent.click(screen.getByRole('button', { name: 'Remove the board' }));
     expect(document.getElementById('part-VA')).toBeNull();
     expect(screen.getByText('0 of 12 rooms wired')).toBeTruthy();
     expect(document.querySelectorAll('.wire')).toHaveLength(1); // the street to the pillar stays
+  });
+});
+
+describe('Load library', () => {
+  const click = (id: string) => fireEvent.click(document.getElementById(id)!);
+  const open = async () => {
+    localStorage.setItem('power-sim:progress:v1', JSON.stringify({ ...STARTER_DONE, 'level-1-villa': { score: 955, stars: 3 }, 'level-2-two-villas': { score: 800, stars: 2 } }));
+    render(<App />);
+    await screen.findByText('0 of 8 rooms wired');
+  };
+
+  it('shows what a motor pulls to start on its room', async () => {
+    await open();
+    expect(document.getElementById('room-S1')!.textContent).toMatch(/starts at 92 A/);
+    expect(document.getElementById('room-S3')!.textContent).not.toMatch(/starts at/);
+  });
+
+  it('opens from the board, and lets the player try a breaker on a load', async () => {
+    await open();
+    expect(screen.queryByRole('region', { name: 'Load library' })).toBeNull();
+    click('open-library');
+    const lib = within(screen.getByRole('region', { name: 'Load library' }));
+    expect(lib.getByRole('heading').textContent).toBe('Water pump'); // the first load with a surge on this job
+    expect(lib.getByRole('status').textContent).toMatch(/Trips on starting: it opens at once from 80 A/);
+    fireEvent.change(document.getElementById('library-breaker')!, { target: { value: '20' } });
+    expect(lib.getByRole('status').textContent).toMatch(/Holds/);
+
+    click('load-heater');
+    expect(lib.getByRole('heading').textContent).toBe('Water heater');
+    expect(lib.getByText('No surge')).toBeTruthy();
+    fireEvent.change(document.getElementById('library-breaker')!, { target: { value: '6' } });
+    expect(lib.getByRole('status').textContent).toMatch(/Overheats/);
+  });
+
+  it('filters by group, and marks what is on this job', async () => {
+    await open();
+    click('open-library');
+    const lib = within(screen.getByRole('region', { name: 'Load library' }));
+    expect(lib.getAllByText('On this job')).toHaveLength(8);
+    fireEvent.click(lib.getByRole('button', { name: 'Home' }));
+    expect(document.getElementById('load-heater')).toBeTruthy();
+    expect(document.getElementById('load-pump')).toBeNull();
   });
 });
 
@@ -260,11 +334,11 @@ describe('Level 1 flow', () => {  it('runs the day, shows the mistakes, and give
 
   it('plays the building with the short-circuit hint', async () => {
     localStorage.setItem('power-sim:progress:v1', JSON.stringify({
-      ...STARTER_DONE, 'level-1-villa': { score: 905, stars: 3 }, 'level-2-two-villas': { score: 800, stars: 2 },
+      ...STARTER_DONE, 'level-1-villa': { score: 905, stars: 3 }, 'level-2-two-villas': { score: 800, stars: 2 }, 'level-services': { score: 800, stars: 2 },
     }));
     render(<App />);
     await screen.findByRole('button', { name: 'Run the day' });
-    fireEvent.click(screen.getByRole('button', { name: /Level 5/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Level 6/ }));
     expect(await screen.findByText(/Short circuit here at 19:30: about 518 A/)).toBeTruthy();
     expect(document.getElementById('ph-2B')).toBeTruthy(); // each flat picks its phase
 
@@ -275,11 +349,11 @@ describe('Level 1 flow', () => {  it('runs the day, shows the mistakes, and give
 
   it('plays the village with a transformer choice', async () => {
     localStorage.setItem('power-sim:progress:v1', JSON.stringify({
-      ...STARTER_DONE, 'level-1-villa': { score: 905, stars: 3 }, 'level-2-two-villas': { score: 800, stars: 2 }, 'level-3-building': { score: 800, stars: 2 },
+      ...STARTER_DONE, 'level-1-villa': { score: 905, stars: 3 }, 'level-2-two-villas': { score: 800, stars: 2 }, 'level-services': { score: 800, stars: 2 }, 'level-3-building': { score: 800, stars: 2 },
     }));
     render(<App />);
     await screen.findByRole('button', { name: 'Run the day' });
-    fireEvent.click(screen.getByRole('button', { name: /Level 6/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Level 7/ }));
     expect(await screen.findByText(/Every room at once: 85 kVA · busiest moment: 69 kVA at 12:00/)).toBeTruthy();
     expect(screen.getByText(/Busiest phase: 416 % of this size/)).toBeTruthy();
 
@@ -299,7 +373,7 @@ describe('Level 1 flow', () => {  it('runs the day, shows the mistakes, and give
 
   it('offers label modes everywhere and a floor choice for the building', async () => {
     localStorage.setItem('power-sim:progress:v1', JSON.stringify({
-      ...STARTER_DONE, 'level-1-villa': { score: 905, stars: 3 }, 'level-2-two-villas': { score: 800, stars: 2 },
+      ...STARTER_DONE, 'level-1-villa': { score: 905, stars: 3 }, 'level-2-two-villas': { score: 800, stars: 2 }, 'level-services': { score: 800, stars: 2 },
     }));
     render(<App />);
     await screen.findByRole('button', { name: 'Run the day' });
@@ -311,10 +385,42 @@ describe('Level 1 flow', () => {  it('runs the day, shows the mistakes, and give
     expect(labels.getByRole('button', { name: 'All' }).getAttribute('aria-pressed')).toBe('true');
     expect(screen.queryByRole('group', { name: 'Floors' })).toBeNull(); // one-storey villa
 
-    fireEvent.click(screen.getByRole('button', { name: /Level 5/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Level 6/ }));
     const floors = within(await screen.findByRole('group', { name: 'Floors' }));
     fireEvent.click(floors.getByRole('button', { name: '1' }));
     expect(floors.getByRole('button', { name: '1' }).getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('plays a power mix: solar alone goes dark at night, a balanced mix earns three stars', async () => {
+    localStorage.setItem('power-sim:progress:v1', JSON.stringify({
+      ...STARTER_DONE, 'level-1-villa': { score: 905, stars: 3 }, 'level-2-two-villas': { score: 800, stars: 2 }, 'level-services': { score: 800, stars: 2 },
+      'level-3-building': { score: 800, stars: 2 }, 'level-4-village': { score: 800, stars: 2 },
+    }));
+    render(<App />);
+    expect(await screen.findByText(/Level 8 · Valley villages · Power mix/)).toBeTruthy();
+    expect(document.getElementById('source-coal')!.textContent).toMatch(/Later level/);
+    const click = (id: string, times = 1) => { for (let i = 0; i < times; i++) fireEvent.click(document.getElementById(id)!); };
+
+    click('more-solar', 10);
+    expect(document.getElementById('source-solar')!.textContent).toMatch(/5 MW/);
+    click('power-on');
+    expect(screen.getByRole('heading', { name: 'The lights went out' })).toBeTruthy();
+    expect(screen.getAllByText(/the sun was down/)).toHaveLength(2); // once for each day
+    expect(screen.getByRole('button', { name: 'Calm, grey day ✕' })).toBeTruthy();
+
+    click('change-mix');
+    click('more-wind', 6);
+    click('more-hydro', 2);
+    click('more-battery');
+    click('more-diesel', 3);
+    click('power-on');
+    expect(screen.getByRole('heading', { name: 'The lights stayed on!' })).toBeTruthy();
+    expect(document.querySelector('.score .stars')!.getAttribute('aria-label')).toBe('3 of 3 stars');
+    expect(document.getElementById('reading-hz')!.textContent).toBe('50.0 Hz');
+    expect(document.querySelector('.world-map li.lit:last-child')).toBeNull(); // Big city is still to come
+    expect(screen.getByText('Villages').closest('li')!.className).toBe('lit');
+    click('next-level');
+    expect(await screen.findByText(/Level 9 · Small city · Power mix/)).toBeTruthy();
   });
 
   it('shows level file problems instead of a blank screen', async () => {

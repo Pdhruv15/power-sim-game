@@ -1,0 +1,23 @@
+{
+  "id": "level-services",
+  "title": "Service block",
+  "project": "Services for a small block",
+  "intro": "This board feeds the services of a small block: a water pump, a lift, a car charger, a clinic and more. The installer gave the pump and the lift breakers that suit their running current. Motors pull far more than that to start, and a room breaker opens at once from 5 × its rating.",
+  "orientation": 0,
+  "supply": { "voltage": 230 },
+  "budget": 1000,
+  "points": { "supply": 300, "safety": 200, "loading": 150, "voltage": 100, "balance": 150, "cost": 100 },
+  "boards": [
+    { "id": "SB", "name": "Services board", "parent": null, "breakerA": 63, "phases": 3 }
+  ],
+  "circuits": [
+    { "id": "S1", "board": "SB", "room": "Water pump",    "type": "pump",        "kw": 3.0, "breakerA": 16, "cableMm2": 2.5, "lengthM": 25, "phase": "L1" },
+    { "id": "S2", "board": "SB", "room": "Lift",          "type": "lift",        "kw": 5.5, "breakerA": 25, "cableMm2": 4,   "lengthM": 30, "phase": "L1" },
+    { "id": "S3", "board": "SB", "room": "Hot water",     "type": "heater",      "kw": 3.0, "breakerA": 16, "cableMm2": 2.5, "lengthM": 15, "phase": "L1" },
+    { "id": "S4", "board": "SB", "room": "Office",        "type": "computers",   "kw": 2.0, "breakerA": 16, "cableMm2": 2.5, "lengthM": 20, "phase": "L1" },
+    { "id": "S5", "board": "SB", "room": "Car charger",   "type": "ev",          "kw": 7.0, "breakerA": 40, "cableMm2": 6,   "lengthM": 20, "phase": "L1" },
+    { "id": "S6", "board": "SB", "room": "Street lights", "type": "streetlight", "kw": 2.0, "breakerA": 16, "cableMm2": 2.5, "lengthM": 40, "phase": "L1" },
+    { "id": "S7", "board": "SB", "room": "Clinic",        "type": "hospital",    "kw": 3.0, "breakerA": 20, "cableMm2": 2.5, "lengthM": 15, "phase": "L1" },
+    { "id": "S8", "board": "SB", "room": "Stairs",        "type": "lighting",    "kw": 1.0, "breakerA": 6,  "cableMm2": 1.5, "lengthM": 30, "phase": "L1" }
+  ]
+}

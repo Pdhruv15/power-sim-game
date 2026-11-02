@@ -1,10 +1,14 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  BOARD_BREAKER_SIZES, BREAKER_SIZES, DEFAULT_POINTS, designCost, peakNeeds, siteDesign, SOLAR_OPTIONS, SIZING_RULE, type SiteBuild,
+  applySiteTool, BOARD_BREAKER_SIZES, BREAKER_SIZES, DEFAULT_POINTS, designCost, peakNeeds, siteDesign, SOLAR_OPTIONS, SIZING_RULE,
+  type SiteBuild, type SiteTool,
 } from '../game';
-import { CABLE_SIZES, cableAmps, PHASES, type Board, type Level, type Phase } from '../sim';
+import type { BuildView } from '../render/SiteScene';
+import { CABLE_SIZES, cableAmps, LOAD_LIBRARY, PHASES, startAmps, type Board, type Level, type Phase } from '../sim';
+import { BuildStage, webglAvailable } from './BuildStage';
 import { fmt, hhmm } from './format';
-import { PartIcon, roomIcon, TERM_TITLES } from './PartIcon';
+import { LoadLibrary } from './LoadLibrary';
+import { loadIcon, PartIcon, TERM_TITLES } from './PartIcon';
 import { trackDrag } from './trackDrag';
 import { TERMINAL_ATTR, useWireDrag } from './useWireDrag';
 import { draftPath, drawWires, routeWires, type WireEnd } from './wireRoute';
@@ -18,6 +22,12 @@ const ROOM_GAP_Y = 12;
 /** Boards stay left of the rooms, leaving a channel for the wires. */
 const PANEL_MIN_X = 130, PANEL_MAX_X = ROOM_COLS[0] - PANEL_W - 52;
 const DEFAULT_CABLE = 2.5;
+/** Cables a room can use. Bigger sizes are for feeders between boards. */
+const ROOM_CABLES = CABLE_SIZES.filter(mm => mm <= 10);
+const MIN_SHEET_H = 300;
+const SHEET_BOARD_X = 200;
+/** With no rooms on it, the plan has the whole width for its boards. */
+const PLAN_TOP_X = 180, PLAN_BELOW_X = 460, PLAN_MAX_X = BOARD_W - PANEL_W - 40;
 
 const STREET_OUT = 'street';
 const boardIn = (id: string) => `in.${id}`;
@@ -40,20 +50,27 @@ interface Props {
 
 /** Build a site from the street: place each board, wire the tree down to every room, and pick the sizes. */
 export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) {
-  const rows = Math.ceil(level.circuits.length / ROOM_COLS.length);
-  const boardH = Math.max(rows * (ROOM_H + ROOM_GAP_Y) + ROOM_GAP_Y, 300);
   const top = level.boards.find(b => b.parent === null)!;
   const below = level.boards.filter(b => b.parent !== null);
+  // With boards below the top one, the plan shows the boards, and each board's rooms open on a sheet of their own
+  const hasSheets = below.length > 0;
+  const [sheet, setSheet] = useState<string | null>(null);
+  const sheetBoard = level.boards.find(b => b.id === sheet);
+  const rooms = sheet ? level.circuits.filter(c => c.board === sheet) : hasSheets ? [] : level.circuits;
+  const rows = Math.ceil(rooms.length / ROOM_COLS.length);
+  const boardH = Math.max(rows * (ROOM_H + ROOM_GAP_Y) + ROOM_GAP_Y, MIN_SHEET_H);
+  const shownBoards = sheetBoard ? [sheetBoard] : level.boards;
   const [spots, setSpots] = useState<Record<string, { x: number; y: number }>>(() => Object.fromEntries(level.boards.map(b => {
-    if (b.parent === null) return [b.id, { x: below.length ? 136 : 200, y: boardH / 2 - PANEL_H / 2 }];
+    if (b.parent === null) return [b.id, { x: below.length ? PLAN_TOP_X : SHEET_BOARD_X, y: boardH / 2 - PANEL_H / 2 }];
     const i = below.indexOf(b);
-    return [b.id, { x: PANEL_MAX_X, y: ((i + 0.5) / below.length) * boardH - PANEL_H / 2 }];
+    return [b.id, { x: PLAN_BELOW_X, y: ((i + 0.5) / below.length) * boardH - PANEL_H / 2 }];
   })));
   const [pending, setPending] = useState<string | null>(null);
   const [cable, setCable] = useState(DEFAULT_CABLE);
   const [selected, setSelected] = useState<string | null>(null);
   const [tip, setTip] = useState<string | null>(null);
   const [ghost, setGhost] = useState<{ name: string; x: number; y: number } | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const area = useRef<HTMLDivElement>(null);
   const dragged = useRef(false);
   const street = { x: STREET.x, y: boardH / 2 - STREET.h / 2 };
@@ -61,6 +78,19 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
   const threePhase = level.boards.some(b => b.phases === 3);
   const solarScored = ((level.points ?? DEFAULT_POINTS).solar ?? 0) > 0;
   const nameOf = (b: Board) => (level.boards.length === 1 ? 'Board' : b.name);
+  // A site with one board is built in the 3D world. Bigger sites, and devices without 3D, use the diagram.
+  const can3d = !hasSheets;
+  const [view, setView] = useState<'3d' | 'diagram'>('3d');
+  const [no3d, setNo3d] = useState(() => !webglAvailable());
+  const in3d = can3d && !no3d && view === '3d';
+  const [tool, setTool] = useState<SiteTool | null>(null);
+
+  useEffect(() => {
+    if (!tool) return;
+    const drop = (e: KeyboardEvent) => { if (e.key === 'Escape') setTool(null); };
+    addEventListener('keydown', drop);
+    return () => removeEventListener('keydown', drop);
+  }, [tool]);
 
   // Learn mode: what each room and board asks for, with the phases as they stand now
   const phaseKey = level.circuits.map(c => build.rooms[c.id].phase).join();
@@ -77,8 +107,11 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
   const setRoom = (id: string, patch: Partial<SiteBuild['rooms'][string]>) =>
     update({ rooms: { ...build.rooms, [id]: { ...build.rooms[id], ...patch } } });
 
+  const openSheet = (id: string | null) => { setSheet(id); setSelected(null); setPending(null); setTip(null); };
+  const spotOf = (id: string) => (id === sheet ? { x: SHEET_BOARD_X, y: boardH / 2 - PANEL_H / 2 } : spots[id]);
+
   const moveBoard = (id: string, x: number, y: number) =>
-    setSpots(s => ({ ...s, [id]: { x: clamp(x, PANEL_MIN_X, PANEL_MAX_X), y: clamp(y, 0, boardH - PANEL_H) } }));
+    setSpots(s => ({ ...s, [id]: { x: clamp(x, PANEL_MIN_X, hasSheets ? PLAN_MAX_X : PANEL_MAX_X), y: clamp(y, 0, boardH - PANEL_H) } }));
 
   /** Lifting a board takes every wire touching it with it. */
   const removeBoard = (id: string) => {
@@ -134,6 +167,26 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
     setSelected(null);
   };
 
+  /** 3D: pick up a part from the bar, or put it back by picking it again. */
+  const takeTool = (t: SiteTool) => {
+    setSelected(null);
+    setTip(null);
+    setTool(cur => (cur?.kind === t.kind && (cur.kind !== 'cable' || t.kind !== 'cable' || cur.mm2 === t.mm2) ? null : t));
+    if (t.kind === 'cable') setCable(t.mm2);
+  };
+  /** 3D: a click on a room or a board uses the part in hand, or picks it to change its sizes. */
+  const pick = (kind: 'room' | 'board', id: string) => {
+    if (!tool) {
+      setTip(null);
+      setSelected(kind === 'room' ? roomIn(id) : `board.${id}`);
+      return;
+    }
+    const r = applySiteTool(level, build, tool, { kind, id });
+    if (!r.build) { setTip(r.tip); return; }
+    update(r.build);
+    if (tool.kind !== 'cable') setTool(null);
+  };
+
   const pressPowerOn = () => {
     const r = siteDesign(level, build);
     if (r.design) onPowerOn(r.design);
@@ -159,20 +212,20 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
     trackDrag(e, (x, y) => moveBoard(id, x - dx, y - dy), () => {});
   };
 
-  const inAt = (id: string): WireEnd => ({ x: spots[id].x, y: spots[id].y + PANEL_H / 2, dir: -1 });
-  const outAt = (id: string): WireEnd => ({ x: spots[id].x + PANEL_W, y: spots[id].y + PANEL_H / 2, dir: 1 });
+  const inAt = (id: string): WireEnd => ({ x: spotOf(id).x, y: spotOf(id).y + PANEL_H / 2, dir: -1 });
+  const outAt = (id: string): WireEnd => ({ x: spotOf(id).x + PANEL_W, y: spotOf(id).y + PANEL_H / 2, dir: 1 });
   const routes = useMemo(() => {
-    const placed = level.boards.filter(b => build.boards[b.id].placed);
+    const placed = shownBoards.filter(b => build.boards[b.id].placed);
     const boxes = [
-      { left: street.x, right: street.x + STREET.w, top: street.y, bottom: street.y + STREET.h },
-      ...placed.map(b => ({ left: spots[b.id].x, right: spots[b.id].x + PANEL_W, top: spots[b.id].y, bottom: spots[b.id].y + PANEL_H })),
-      ...level.circuits.map((_, i) => { const at = roomAt(i); return { left: at.x, right: at.x + ROOM_W, top: at.y, bottom: at.y + ROOM_H }; }),
+      ...(sheet ? [] : [{ left: street.x, right: street.x + STREET.w, top: street.y, bottom: street.y + STREET.h }]),
+      ...placed.map(b => ({ left: spotOf(b.id).x, right: spotOf(b.id).x + PANEL_W, top: spotOf(b.id).y, bottom: spotOf(b.id).y + PANEL_H })),
+      ...rooms.map((_, i) => { const at = roomAt(i); return { left: at.x, right: at.x + ROOM_W, top: at.y, bottom: at.y + ROOM_H }; }),
     ];
     const jobs = [
-      ...(build.supplyWired ? [{ id: STREET_OUT, from: STREET_OUT, to: boardIn(top.id), a: { x: street.x + STREET.w, y: street.y + STREET.h / 2, dir: 1 as const }, b: inAt(top.id) }] : []),
-      ...below.filter(b => build.boards[b.id].mm2 != null)
+      ...(build.supplyWired && !sheet ? [{ id: STREET_OUT, from: STREET_OUT, to: boardIn(top.id), a: { x: street.x + STREET.w, y: street.y + STREET.h / 2, dir: 1 as const }, b: inAt(top.id) }] : []),
+      ...below.filter(b => !sheet && build.boards[b.id].mm2 != null)
         .map(b => ({ id: feederWire(b.id), from: boardOut(b.parent!), to: boardIn(b.id), a: outAt(b.parent!), b: inAt(b.id) })),
-      ...level.circuits.flatMap((c, i) => {
+      ...rooms.flatMap((c, i) => {
         if (build.rooms[c.id].mm2 == null) return [];
         const at = roomAt(i);
         return [{ id: roomIn(c.id), from: boardOut(c.board), to: roomIn(c.id), a: outAt(c.board), b: { x: at.x, y: at.y + ROOM_H / 2, dir: -1 as const } }];
@@ -181,7 +234,7 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
     return drawWires(jobs, routeWires(jobs, BOARD_W, boardH, boxes));
     // Everything else here follows from the level, which fixes the board's size and the rooms
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [level, build, spots]);
+  }, [level, build, spots, sheet]);
   const preview = useMemo(() => {
     const r = siteDesign(level, build);
     return r.design ? designCost(r.design) : null;
@@ -189,136 +242,306 @@ export function SiteBuilder({ level, goal, build, onChange, onPowerOn }: Props) 
   const wired = level.circuits.filter(c => build.rooms[c.id].mm2 != null).length;
   const budget = level.budget ?? null;
   const selectedBoard = level.boards.find(b => selected === `board.${b.id}`);
+  const selectedRoom = level.circuits.find(c => selected === roomIn(c.id));
+
+  const buildView = useMemo<BuildView>(() => ({
+    boards: Object.fromEntries(level.boards.map(b => {
+      const s = build.boards[b.id];
+      return [b.id, { placed: s.placed, fed: s.mm2 != null, name: nameOf(b), text: s.placed ? `${s.breakerA} A` : 'not placed' }];
+    })),
+    supplyWired: build.supplyWired,
+    rooms: Object.fromEntries(level.circuits.map(c => {
+      const r = build.rooms[c.id];
+      return [c.id, { wired: r.mm2 != null, text: r.mm2 != null ? `${r.breakerA} A · ${r.mm2} mm²` : `up to ${fmt(needs.circuits.get(c.id)?.amps ?? 0)} A` }];
+    })),
+    selected: selectedRoom?.id ?? selectedBoard?.id ?? null,
+    targets: tool?.kind === 'supply' ? 'boards' : tool ? 'rooms' : null,
+    ghostBoards: tool?.kind === 'board',
+    // nameOf only reads the level
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [level, build, needs, selectedRoom, selectedBoard, tool]);
+  const toolHint = !tool
+    ? 'Pick a part below, then click in the house. Click a room to change its sizes.'
+    : tool.kind === 'board' ? `Click the house to fix the ${nameOf(top).toLowerCase()} at the end of the corridor.`
+      : tool.kind === 'supply' ? `Click the ${nameOf(top).toLowerCase()} to bring the street cable to it.`
+        : `Click each room to run a ${tool.mm2} mm² cable to it (good for ${cableAmps(tool.mm2)} A). Pick the cable again, or press Esc, to put it down.`;
 
   return (
     <section className="sim site-build">
       <div className="stage-col">
-        <section className="panel tray" aria-label="Parts">
-          <h2>Parts</h2>
-          <div className="tray-items">
-            {level.boards.map(b => (
-              <button
-                key={b.id} id={`tray-${b.id}`} type="button" className="tray-item" disabled={build.boards[b.id].placed}
-                onPointerDown={e => startTrayDrag(e, b)} onClick={() => { if (!dragged.current) placeBoard(b); dragged.current = false; }}
-              >
-                <PartIcon name="board" size={18} /> <b>{b.name}</b> <small>{build.boards[b.id].placed ? 'placed' : '1 left'}</small>
-              </button>
-            ))}
+        {can3d && !no3d && (
+          <div className="seg view-pick" role="group" aria-label="View">
+            <button type="button" id="view-3d" aria-pressed={view === '3d'} onClick={() => { setView('3d'); setSelected(null); setPending(null); }}>3D</button>
+            <button type="button" id="view-diagram" aria-pressed={view === 'diagram'} onClick={() => { setView('diagram'); setSelected(null); setTool(null); }}>Diagram</button>
           </div>
-          <div className="seg cable-pick" role="group" aria-label="Cable">
-            <span>Cable</span>
-            {CABLE_SIZES.map(mm => (
-              <button key={mm} id={`cable-${mm}`} type="button" aria-pressed={cable === mm} onClick={() => pickCable(mm)} title={`Good for ${cableAmps(mm)} A`}>{mm}</button>
-            ))}
-            <span>mm² · {cableAmps(cable)} A</span>
-          </div>
-        </section>
+        )}
 
-        <div className="board-scroll">
-          <div
-            ref={area} className="board" style={{ width: BOARD_W, height: boardH }}
-            onPointerDown={e => { if (e.target === e.currentTarget) { setSelected(null); setPending(null); } }}
-          >
-            <svg className="wires" width={BOARD_W} height={boardH} aria-hidden={wired === 0 && !build.supplyWired}>
-              {build.supplyWired && (
-                <SiteWire id={STREET_OUT} label={`Street to ${top.name}`} d={routes.paths.get(STREET_OUT)!} mm2={16} selected={selected === STREET_OUT} onSelect={setSelected} />
-              )}
-              {below.map(b => {
-                const mm2 = build.boards[b.id].mm2;
-                if (mm2 == null) return null;
-                return <SiteWire key={b.id} id={feederWire(b.id)} label={`${b.name} feeder, ${mm2} mm²`} d={routes.paths.get(feederWire(b.id))!} mm2={mm2} selected={selected === feederWire(b.id)} onSelect={setSelected} />;
-              })}
-              {level.circuits.map(c => {
-                const mm2 = build.rooms[c.id].mm2;
-                if (mm2 == null) return null;
-                return <SiteWire key={c.id} id={roomIn(c.id)} label={`${c.room} cable, ${mm2} mm²`} d={routes.paths.get(roomIn(c.id))!} mm2={mm2} selected={selected === roomIn(c.id)} onSelect={setSelected} />;
-              })}
-              {routes.dots.map(p => <circle key={`${p.x},${p.y}`} className="wire-dot" cx={p.x} cy={p.y} r={3.5} />)}
-              {wireDraft && <path className="wire-preview" d={draftPath(wireDraft)} />}
-            </svg>
-
-            {wired === 0 && !build.supplyWired && <p className="board-tip">Drag from one circle to another to add a wire.</p>}
-
-            <div className="part kind-supply" style={{ left: street.x, top: street.y, width: STREET.w, height: STREET.h }}>
-              <PartIcon name="supply" />
-              <span className="part-name">Street supply</span>
-              <button id="term-street" type="button" aria-label="Street supply" {...termProps(STREET_OUT, build.supplyWired, 'b')} />
+        {in3d ? (
+          <>
+            <div className="stage-wrap build-wrap">
+              <BuildStage
+                level={level} view={buildView} onPick={pick} onFail={() => { setNo3d(true); setTool(null); }}
+                onMiss={() => { if (tool) setTip(`Click inside the house: a room, or the ${nameOf(top).toLowerCase()} at the end of the corridor.`); else setSelected(null); }}
+              />
+              <p className="build-count"><b>{wired} of {level.circuits.length}</b> rooms wired</p>
             </div>
 
-            {level.boards.filter(b => build.boards[b.id].placed).map(b => {
-              const need = needs.boards.get(b.id);
-              const split = b.phases === 3 ? PHASES.map((p, i) => `${p} ${fmt(need?.phaseAmps?.[i] ?? 0, 0)}`).join(' · ') : `${fmt(need?.amps ?? 0, 0)} A`;
-              const parent = level.boards.find(x => x.id === b.parent);
-              return (
-                <div
-                  key={b.id} id={`part-${b.id}`} role="group" tabIndex={0} aria-label={b.name} className={`part panel-part${selected === `board.${b.id}` ? ' sel' : ''}`}
-                  style={{ left: spots[b.id].x, top: spots[b.id].y, width: PANEL_W, height: PANEL_H }}
-                  onPointerDown={e => { setSelected(`board.${b.id}`); startMoveBoard(e, b.id); }}
-                  onKeyDown={e => {
-                    const step: Record<string, [number, number]> = { ArrowLeft: [-10, 0], ArrowRight: [10, 0], ArrowUp: [0, -10], ArrowDown: [0, 10] };
-                    if (step[e.key]) { e.preventDefault(); moveBoard(b.id, spots[b.id].x + step[e.key][0], spots[b.id].y + step[e.key][1]); }
-                  }}
+            <div className="hotbar" role="toolbar" aria-label="Parts">
+              {level.boards.map(b => (
+                <button
+                  key={b.id} type="button" id={`tool-board-${b.id}`} className="hot-slot" aria-pressed={tool?.kind === 'board'}
+                  disabled={build.boards[b.id].placed} onClick={() => takeTool({ kind: 'board' })}
                 >
-                  <PartIcon name="board" size={24} />
-                  <span className="part-name">{nameOf(b)}</span>
-                  <small className="part-state">{split}</small>
-                  <select
-                    id={`brk-${b.id}`} aria-label={`${b.name} breaker`} value={build.boards[b.id].breakerA}
-                    onPointerDown={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}
-                    onChange={e => setBoard(b.id, { breakerA: Number(e.target.value) })}
-                  >
-                    {BOARD_BREAKER_SIZES.map(a => <option key={a} value={a}>{a} A</option>)}
-                  </select>
-                  <button
-                    id={`term-${b.id}-in`} type="button" aria-label={`${b.name}, ${parent ? `feed from ${parent.name}` : 'from the street'}`}
-                    {...termProps(boardIn(b.id), b.parent === null ? build.supplyWired : build.boards[b.id].mm2 != null, 'a')}
-                  />
-                  <button
-                    id={`term-${b.id}-out`} type="button" aria-label={`${b.name}, feeds out`}
-                    {...termProps(boardOut(b.id), below.some(x => x.parent === b.id && build.boards[x.id].mm2 != null) || level.circuits.some(c => c.board === b.id && build.rooms[c.id].mm2 != null), 'b')}
-                  />
-                </div>
-              );
-            })}
+                  <PartIcon name="board" size={22} /><b>{nameOf(b)}</b><small>{build.boards[b.id].placed ? 'placed' : '1 left'}</small>
+                </button>
+              ))}
+              <button
+                type="button" id="tool-supply" className="hot-slot" aria-pressed={tool?.kind === 'supply'}
+                disabled={build.supplyWired} onClick={() => takeTool({ kind: 'supply' })}
+              >
+                <PartIcon name="supply" size={22} /><b>Street cable</b><small>{build.supplyWired ? 'laid' : 'to the board'}</small>
+              </button>
+              {ROOM_CABLES.map(mm => (
+                <button
+                  key={mm} type="button" id={`tool-cable-${mm}`} className="hot-slot cable" aria-pressed={tool?.kind === 'cable' && tool.mm2 === mm}
+                  onClick={() => takeTool({ kind: 'cable', mm2: mm })}
+                >
+                  <i style={{ height: Math.min(8, 2 + mm * 0.6) }} aria-hidden="true" /><b>{mm} mm²</b><small>{cableAmps(mm)} A</small>
+                </button>
+              ))}
+            </div>
 
-            {level.circuits.map((c, i) => {
-              const at = roomAt(i);
-              const need = needs.circuits.get(c.id);
-              const t = roomIn(c.id);
+            <div className="pick-strip" role="group" aria-label="Rooms">
+              {level.circuits.map(c => (
+                <button
+                  key={c.id} type="button" id={`pick-${c.id}`}
+                  className={`pick-chip${build.rooms[c.id].mm2 != null ? ' on' : ''}${selectedRoom?.id === c.id ? ' sel' : ''}`}
+                  onClick={() => pick('room', c.id)}
+                >
+                  <PartIcon name={loadIcon(c.type)} size={16} />{c.room}
+                </button>
+              ))}
+              {level.boards.map(b => (
+                <button
+                  key={b.id} type="button" id={`pick-board-${b.id}`}
+                  className={`pick-chip board${build.boards[b.id].placed ? ' on' : ''}${selectedBoard?.id === b.id ? ' sel' : ''}`}
+                  onClick={() => pick('board', b.id)}
+                >
+                  <PartIcon name="board" size={16} />{nameOf(b)}
+                </button>
+              ))}
+            </div>
+
+            {selectedRoom && (() => {
+              const c = selectedRoom, room = build.rooms[c.id], need = needs.circuits.get(c.id);
               const board = level.boards.find(b => b.id === c.board)!;
-              const room = build.rooms[c.id];
-              const owner = level.boards.length > 1 ? `${board.name} · ` : '';
               return (
-                <div key={c.id} id={`room-${c.id}`} role="group" aria-label={`${owner}${c.room}`} className="part room-part" style={{ left: at.x, top: at.y, width: ROOM_W, height: ROOM_H }}>
-                  <span className="part-title"><PartIcon name={roomIcon(c.room)} size={20} /><span className="part-name">{owner}{c.room}</span></span>
-                  <small className="part-state">up to {fmt(need?.amps ?? 0)} A at {hhmm(need?.hour ?? 0)}</small>
-                  <span className="room-picks">
-                    <select
-                      id={`brk-${c.id}`} aria-label={`${c.room} breaker`} value={room.breakerA}
-                      onChange={e => setRoom(c.id, { breakerA: Number(e.target.value) })}
-                    >
-                      {BREAKER_SIZES.map(a => <option key={a} value={a}>{a} A</option>)}
-                    </select>
-                    {board.phases === 3 && (
-                      <select id={`ph-${c.id}`} aria-label={`${c.room} phase`} value={room.phase} onChange={e => setRoom(c.id, { phase: e.target.value as Phase })}>
-                        {PHASES.map(p => <option key={p} value={p}>{p}</option>)}
+                <section className="panel pick-card" aria-label={c.room}>
+                  <header><h2><PartIcon name={loadIcon(c.type)} size={20} /> {c.room}</h2><small>up to {fmt(need?.amps ?? 0)} A at {hhmm(need?.hour ?? 0)}</small></header>
+                  {LOAD_LIBRARY[c.type].startMultiple > 1 && <p className="part-state starts">Starts at {fmt(startAmps(c.kw, c.type, level.voltage), 0)} A</p>}
+                  <div className="pick-fields">
+                    <label>Breaker
+                      <select id={`brk-${c.id}`} value={room.breakerA} onChange={e => setRoom(c.id, { breakerA: Number(e.target.value) })}>
+                        {BREAKER_SIZES.map(a => <option key={a} value={a}>{a} A</option>)}
                       </select>
+                    </label>
+                    <label>Cable
+                      <select id={`cable-${c.id}`} value={room.mm2 ?? ''} onChange={e => setRoom(c.id, { mm2: e.target.value === '' ? null : Number(e.target.value) })}>
+                        <option value="">None yet</option>
+                        {ROOM_CABLES.map(mm => <option key={mm} value={mm}>{mm} mm² · {cableAmps(mm)} A</option>)}
+                      </select>
+                    </label>
+                    {board.phases === 3 && (
+                      <label>Phase
+                        <select id={`ph-${c.id}`} value={room.phase} onChange={e => setRoom(c.id, { phase: e.target.value as Phase })}>
+                          {PHASES.map(p => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                      </label>
                     )}
-                  </span>
-                  <button id={`term-${c.id}`} type="button" aria-label={`${c.room}, cable in`} {...termProps(t, room.mm2 != null, 'a')} />
-                </div>
+                  </div>
+                </section>
               );
-            })}
-          </div>
-        </div>
+            })()}
+            {selectedBoard && (
+              <section className="panel pick-card" aria-label={selectedBoard.name}>
+                <header>
+                  <h2><PartIcon name="board" size={20} /> {nameOf(selectedBoard)}</h2>
+                  <small>{build.boards[selectedBoard.id].placed ? `everything at once: up to ${fmt(needs.boards.get(selectedBoard.id)?.amps ?? 0, 0)} A` : 'not placed yet'}</small>
+                </header>
+                {build.boards[selectedBoard.id].placed && (
+                  <div className="pick-fields">
+                    <label>Main breaker
+                      <select id={`brk-${selectedBoard.id}`} value={build.boards[selectedBoard.id].breakerA} onChange={e => setBoard(selectedBoard.id, { breakerA: Number(e.target.value) })}>
+                        {BOARD_BREAKER_SIZES.map(a => <option key={a} value={a}>{a} A</option>)}
+                      </select>
+                    </label>
+                    <small>{build.supplyWired ? 'Street cable laid' : 'No street cable yet'}</small>
+                  </div>
+                )}
+              </section>
+            )}
+          </>
+        ) : (
+          <>
+            <section className="panel tray" aria-label="Parts">
+              <h2>Parts</h2>
+              <div className="tray-items">
+                {level.boards.map(b => (
+                  <button
+                    key={b.id} id={`tray-${b.id}`} type="button" className="tray-item" disabled={build.boards[b.id].placed}
+                    onPointerDown={e => startTrayDrag(e, b)} onClick={() => { if (!dragged.current) placeBoard(b); dragged.current = false; }}
+                  >
+                    <PartIcon name="board" size={20} /> <b>{b.name}</b> <small>{build.boards[b.id].placed ? 'placed' : '1 left'}</small>
+                  </button>
+                ))}
+              </div>
+              <div className="seg cable-pick" role="group" aria-label="Cable">
+                <span>Cable</span>
+                {CABLE_SIZES.map(mm => (
+                  <button key={mm} id={`cable-${mm}`} type="button" aria-pressed={cable === mm} onClick={() => pickCable(mm)} title={`Good for ${cableAmps(mm)} A`}>{mm}</button>
+                ))}
+                <span>mm² · {cableAmps(cable)} A</span>
+              </div>
+            </section>
+
+            {hasSheets && (
+              <nav className="sheet-path" aria-label="Sheets">
+                {sheetBoard
+                  ? <><button type="button" id="sheet-up" className="btn" onClick={() => openSheet(null)}>{level.title}</button><span aria-hidden="true">›</span><b>{sheetBoard.name}</b></>
+                  : <b>{level.title}</b>}
+              </nav>
+            )}
+
+            <div className="board-scroll">
+              <div
+                ref={area} className="board" style={{ width: BOARD_W, height: boardH }}
+                onPointerDown={e => { if (e.target === e.currentTarget) { setSelected(null); setPending(null); } }}
+              >
+                <svg className="wires" width={BOARD_W} height={boardH} aria-hidden={wired === 0 && !build.supplyWired}>
+                  {build.supplyWired && !sheet && (
+                    <SiteWire id={STREET_OUT} label={`Street to ${top.name}`} d={routes.paths.get(STREET_OUT)!} mm2={16} selected={selected === STREET_OUT} onSelect={setSelected} />
+                  )}
+                  {below.map(b => {
+                    const mm2 = build.boards[b.id].mm2;
+                    if (mm2 == null || sheet) return null;
+                    return <SiteWire key={b.id} id={feederWire(b.id)} label={`${b.name} feeder, ${mm2} mm²`} d={routes.paths.get(feederWire(b.id))!} mm2={mm2} selected={selected === feederWire(b.id)} onSelect={setSelected} />;
+                  })}
+                  {rooms.map(c => {
+                    const mm2 = build.rooms[c.id].mm2;
+                    if (mm2 == null) return null;
+                    return <SiteWire key={c.id} id={roomIn(c.id)} label={`${c.room} cable, ${mm2} mm²`} d={routes.paths.get(roomIn(c.id))!} mm2={mm2} selected={selected === roomIn(c.id)} onSelect={setSelected} />;
+                  })}
+                  {routes.dots.map(p => <circle key={`${p.x},${p.y}`} className="wire-dot" cx={p.x} cy={p.y} r={3.5} />)}
+                  {wireDraft && <path className="wire-preview" d={draftPath(wireDraft)} />}
+                </svg>
+
+                {wired === 0 && !build.supplyWired && !sheet && <p className="board-tip">Drag from one circle to another to add a wire.</p>}
+                {wired === 0 && build.supplyWired && hasSheets && !sheet && <p className="board-tip left">Press Open on a board to wire its rooms.</p>}
+
+                {!sheet && (
+                  <div className="part kind-supply" style={{ left: street.x, top: street.y, width: STREET.w, height: STREET.h }}>
+                    <PartIcon name="supply" />
+                    <span className="part-name">Street supply</span>
+                    <button id="term-street" type="button" aria-label="Street supply" {...termProps(STREET_OUT, build.supplyWired, 'b')} />
+                  </div>
+                )}
+
+                {shownBoards.filter(b => build.boards[b.id].placed).map(b => {
+                  const need = needs.boards.get(b.id);
+                  const split = b.phases === 3 ? PHASES.map((p, i) => `${p} ${fmt(need?.phaseAmps?.[i] ?? 0, 0)}`).join(' · ') : `${fmt(need?.amps ?? 0, 0)} A`;
+                  const parent = level.boards.find(x => x.id === b.parent);
+                  const own = level.circuits.filter(c => c.board === b.id);
+                  const ownWired = own.filter(c => build.rooms[c.id].mm2 != null).length;
+                  const closed = hasSheets && !sheet && own.length > 0;
+                  const onSheet = b.id === sheet;
+                  const at = spotOf(b.id);
+                  return (
+                    <div
+                      key={b.id} id={`part-${b.id}`} role="group" tabIndex={0} aria-label={b.name} className={`part panel-part${selected === `board.${b.id}` ? ' sel' : ''}${closed && ownWired === own.length ? ' sheet-done' : ''}`}
+                      style={{ left: at.x, top: at.y, width: PANEL_W, height: PANEL_H }}
+                      onPointerDown={e => { if (onSheet) return; setSelected(`board.${b.id}`); startMoveBoard(e, b.id); }}
+                      onDoubleClick={() => { if (closed) openSheet(b.id); }}
+                      onKeyDown={e => {
+                        if (onSheet) return;
+                        const step: Record<string, [number, number]> = { ArrowLeft: [-10, 0], ArrowRight: [10, 0], ArrowUp: [0, -10], ArrowDown: [0, 10] };
+                        if (step[e.key]) { e.preventDefault(); moveBoard(b.id, spots[b.id].x + step[e.key][0], spots[b.id].y + step[e.key][1]); }
+                      }}
+                    >
+                      <span className="part-title"><PartIcon name="board" size={20} /><span className="part-name">{nameOf(b)}</span></span>
+                      <small className="part-state">{split}</small>
+                      <select
+                        id={`brk-${b.id}`} aria-label={`${b.name} breaker`} value={build.boards[b.id].breakerA}
+                        onPointerDown={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}
+                        onChange={e => setBoard(b.id, { breakerA: Number(e.target.value) })}
+                      >
+                        {BOARD_BREAKER_SIZES.map(a => <option key={a} value={a}>{a} A</option>)}
+                      </select>
+                      {closed && (
+                        <span className="sheet-open">
+                          <small>{ownWired} of {own.length} wired</small>
+                          <button
+                            type="button" id={`open-${b.id}`} className="btn" aria-label={`Open ${b.name}`}
+                            onPointerDown={e => e.stopPropagation()} onClick={() => openSheet(b.id)}
+                          >Open</button>
+                        </span>
+                      )}
+                      <button
+                        id={`term-${b.id}-in`} type="button" aria-label={`${b.name}, ${parent ? `feed from ${parent.name}` : 'from the street'}`}
+                        {...termProps(boardIn(b.id), b.parent === null ? build.supplyWired : build.boards[b.id].mm2 != null, 'a')}
+                      />
+                      <button
+                        id={`term-${b.id}-out`} type="button" aria-label={`${b.name}, feeds out`}
+                        {...termProps(boardOut(b.id), below.some(x => x.parent === b.id && build.boards[x.id].mm2 != null) || level.circuits.some(c => c.board === b.id && build.rooms[c.id].mm2 != null), 'b')}
+                      />
+                    </div>
+                  );
+                })}
+
+                {rooms.map((c, i) => {
+                  const at = roomAt(i);
+                  const need = needs.circuits.get(c.id);
+                  const t = roomIn(c.id);
+                  const board = level.boards.find(b => b.id === c.board)!;
+                  const room = build.rooms[c.id];
+                  return (
+                    <div key={c.id} id={`room-${c.id}`} role="group" aria-label={c.room} className="part room-part" style={{ left: at.x, top: at.y, width: ROOM_W, height: ROOM_H }}>
+                      <span className="part-title"><PartIcon name={loadIcon(c.type)} size={22} /><span className="part-name">{c.room}</span></span>
+                      <small className="part-state">up to {fmt(need?.amps ?? 0)} A at {hhmm(need?.hour ?? 0)}</small>
+                      {LOAD_LIBRARY[c.type].startMultiple > 1 && <small className="part-state starts">starts at {fmt(startAmps(c.kw, c.type, level.voltage), 0)} A</small>}
+                      <span className="room-picks">
+                        <select
+                          id={`brk-${c.id}`} aria-label={`${c.room} breaker`} value={room.breakerA}
+                          onChange={e => setRoom(c.id, { breakerA: Number(e.target.value) })}
+                        >
+                          {BREAKER_SIZES.map(a => <option key={a} value={a}>{a} A</option>)}
+                        </select>
+                        {board.phases === 3 && (
+                          <select id={`ph-${c.id}`} aria-label={`${c.room} phase`} value={room.phase} onChange={e => setRoom(c.id, { phase: e.target.value as Phase })}>
+                            {PHASES.map(p => <option key={p} value={p}>{p}</option>)}
+                          </select>
+                        )}
+                      </span>
+                      <button id={`term-${c.id}`} type="button" aria-label={`${c.room}, cable in`} {...termProps(t, room.mm2 != null, 'a')} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        )}
 
         <div className="controls workshop-controls">
           <button type="button" id="power-on" className="btn primary power-on" onClick={pressPowerOn}>Power On</button>
-          <span className="hint-now">{pending ? 'Now click where this wire goes.' : 'Drag between two circles to add a wire, or click one, then the other. New wires use the cable picked above.'}</span>
+          <button type="button" id="open-library" className="btn" aria-expanded={libraryOpen} onClick={() => setLibraryOpen(o => !o)}>Load library</button>
+          <span className="hint-now">
+            {in3d ? toolHint : pending ? 'Now click where this wire goes.' : 'Drag between two circles to add a wire, or click one, then the other. New wires use the cable picked above.'}
+          </span>
           {selectedBoard
             ? <button type="button" className="btn" onClick={() => removeBoard(selectedBoard.id)}>Remove the board</button>
             : selected && <button type="button" className="btn" onClick={removeWire}>Remove the wire</button>}
         </div>
+
+        {libraryOpen && <LoadLibrary voltage={level.voltage} onThisJob={[...new Set(level.circuits.map(c => c.type))]} />}
       </div>
 
       <div className="side">
