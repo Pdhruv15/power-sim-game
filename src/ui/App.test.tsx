@@ -436,6 +436,35 @@ describe('Level 1 flow', () => {  it('runs the day, shows the mistakes, and give
     expect(await screen.findByText(/Level 3 · One villa/)).toBeTruthy();
   });
 
+  it('plays the power line: 11 kV trips at once, 132 kV on a heavy line earns three stars', async () => {
+    const done = { score: 800, stars: 2 };
+    localStorage.setItem('power-sim:progress:v1', JSON.stringify({
+      ...STARTER_DONE, 'level-1-villa': done, 'level-2-two-villas': done, 'level-services': done, 'level-3-building': done,
+      'level-4-village': done, 'level-mix-valley': done, 'level-mix-city': done, 'level-mix-metro': done,
+    }));
+    render(<App />);
+    expect(await screen.findByText(/Level 11 · Power line · Transmission/)).toBeTruthy();
+    const click = (id: string) => fireEvent.click(document.getElementById(id)!);
+    expect(document.getElementById('peak-amps')!.textContent).toBe("The evening's 80 MW needs 4420 A at 11 kV, shared by the lines.");
+    expect(document.getElementById('up-mva')).toBeNull(); // the dam already makes 11 kV
+
+    click('power-on');
+    expect(screen.getByRole('heading', { name: 'The city went dark' })).toBeTruthy();
+    expect(screen.getByText(/^At 00:00 Line A carried \d+ A, above the 300 A it can take/)).toBeTruthy();
+
+    click('change-design');
+    click('kv-132');
+    click('line-heavy');
+    pick('up-mva', '100');
+    pick('down-mva', '100');
+    expect(document.getElementById('peak-amps')!.textContent).toMatch(/needs 368 A at 132 kV/);
+    click('power-on');
+    expect(screen.getByRole('heading', { name: 'The city kept its power!' })).toBeTruthy();
+    expect(document.querySelector('.score .stars')!.getAttribute('aria-label')).toBe('3 of 3 stars');
+    expect(document.getElementById('reading-voltage')!.textContent).toMatch(/^9[5-9] %$/);
+    expect(screen.getByText('Grid').closest('li')!.className).toBe('lit');
+  });
+
   it('shows level file problems instead of a blank screen', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"project":"x"}', { status: 200 })));
     render(<App />);

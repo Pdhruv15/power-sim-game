@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LabelMode } from '../render/labelRules';
 import {
-  BOARD_BREAKER_SIZES, BREAKER_SIZES, coinsEarned, DAY_STEP_HOURS, MIX_MISSIONS, newSiteBuild, runDay, scoreDay, STARTING_COINS, type DayRun, type ScoreCard, type SiteBuild,
+  BOARD_BREAKER_SIZES, BREAKER_SIZES, coinsEarned, DAY_STEP_HOURS, GRID_MISSIONS, MIX_MISSIONS, newSiteBuild, runDay, scoreDay, STARTING_COINS, type DayRun, type ScoreCard, type SiteBuild,
 } from '../game';
 import { LevelError, parseLevel, Simulator, topBoard, totalSolarKw, type Level } from '../sim';
 import { CircuitList } from './CircuitList';
@@ -9,6 +9,7 @@ import { DesignPanel } from './DesignPanel';
 import { EventLog } from './EventLog';
 import { Kpis } from './Kpis';
 import { LEVELS, type LevelEntry } from './levels';
+import { GridLevel } from './GridLevel';
 import { LoadChart } from './LoadChart';
 import { MixLevel } from './MixLevel';
 import { isUnlocked, loadProgress, loadWallet, saveResult, saveWallet, type Best } from './progress';
@@ -79,6 +80,7 @@ export function App() {
       onResult: (stars: number) => setProgress(saveResult(entry.id, { score: stars, stars })),
       onNext: next ? () => setEntry(next) : null,
     };
+    if (GRID_MISSIONS[entry.id]) return <GridLevel key={entry.id} {...props} />;
     return MIX_MISSIONS[entry.id] ? <MixLevel key={entry.id} {...props} /> : <WorkshopLevel key={entry.id} {...props} />;
   }
   if (error) return <main className="app">{picker}<pre className="error">{error}</pre></main>;
