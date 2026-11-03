@@ -33,6 +33,8 @@ export const LEVELS: readonly LevelEntry[] = [
   { id: 'level-mix-valley', number: 8, title: 'Valley villages' },
   { id: 'level-mix-city', number: 9, title: 'Small city' },
   { id: 'level-mix-metro', number: 10, title: 'Big city' },
+  // Transmission levels are built from src/game/grid.ts
+  { id: 'level-grid-line', number: 11, title: 'Power line' },
 ];
 
 /** The world the player lights up, step by step. Steps with no level yet are still to come. */
@@ -46,4 +48,5 @@ export const WORLD_MAP: readonly { name: string; level?: string }[] = [
   { name: 'Villages', level: 'level-mix-valley' },
   { name: 'Small city', level: 'level-mix-city' },
   { name: 'Big city', level: 'level-mix-metro' },
+  { name: 'Grid', level: 'level-grid-line' },
 ];

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BuildView } from '../render/SiteScene';
 import { App } from './App';
@@ -32,6 +32,8 @@ vi.mock('../render/SiteScene', () => ({
 const level = (name: string) => readFileSync(resolve(process.cwd(), 'public/data', name), 'utf8');
 const click = (id: string) => fireEvent.click(document.getElementById(id)!);
 const lastView = () => scenes[scenes.length - 1].views.at(-1)!;
+/** The 3D view starts just after the level shows, so wait for it before looking at what it was asked to draw. */
+const sceneReady = () => waitFor(() => expect(scenes.at(-1)?.views.length).toBeGreaterThan(0));
 
 beforeEach(() => {
   scenes.length = 0;
@@ -46,6 +48,7 @@ describe('Building the villa in 3D', () => {
   it('opens in 3D, and can switch to the diagram and back', async () => {
     render(<App />);
     await screen.findByText('0 of 8 rooms wired');
+    await sceneReady();
     expect(document.getElementById('view-3d')!.getAttribute('aria-pressed')).toBe('true');
     expect(document.getElementById('term-street')).toBeNull();
     expect(lastView().ghostBoards).toBe(false);
@@ -58,6 +61,7 @@ describe('Building the villa in 3D', () => {
   it('builds with parts in hand: board, street cable, then a cable to each room clicked', async () => {
     render(<App />);
     await screen.findByText('0 of 8 rooms wired');
+    await sceneReady();
     const status = () => screen.getByRole('status').textContent;
 
     click('tool-cable-2.5');
@@ -93,6 +97,7 @@ describe('Building the villa in 3D', () => {
   it('picks a room to change its sizes, and runs the day once every room is wired', async () => {
     render(<App />);
     await screen.findByText('0 of 8 rooms wired');
+    await sceneReady();
     click('tool-board-DB');
     click('pick-C1');
     click('tool-supply');
@@ -137,6 +142,7 @@ describe('Building two villas in 3D', () => {
     }));
     render(<App />);
     await screen.findByText('0 of 12 rooms wired');
+    await sceneReady();
   };
   const status = () => screen.getByRole('status').textContent;
 
@@ -202,6 +208,7 @@ describe('Building the village in 3D', () => {
     }));
     render(<App />);
     await screen.findByText('0 of 18 rooms wired');
+    await sceneReady();
   };
 
   it('picks the transformer size, and puts each single-phase home on a phase with the brush', async () => {
